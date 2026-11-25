@@ -1162,11 +1162,15 @@ fn device_cues(
     let analysis = assets_of(mount, format, track)
         .1
         .analysis_dat()
-        .and_then(|dat| {
-            let ext = dat.with_extension("EXT");
-            let relative = ext.strip_prefix(mount).ok()?.to_str()?;
-            let ext = DeviceAssets::on_stick(mount, relative)?;
-            read_browser_ext(&ext, remaining).map(|file| file.cue_entries())
+        .and_then(|dat| match browser_ext_sibling(&dat) {
+            // A present EXT owns the cues, even when empty or unreadable.
+            BrowserExt::Present(ext) => read_browser_ext(&ext, remaining).map(|file| file.cue_entries()),
+            BrowserExt::Missing if format == Format::DeviceLibrary => {
+                // DAT-only exports keep legacy PCOB/PCPT cues, under the
+                // same bounded reader and view budget as an EXT companion.
+                read_browser_ext(&dat, remaining).map(|file| file.legacy_cue_entries())
+            }
+            BrowserExt::Missing | BrowserExt::Refused => None,
         })
         .unwrap_or_default();
     cues = match format {
@@ -1193,6 +1197,43 @@ fn device_cues(
     };
     cues.sort_by_key(|cue| (cue.position_ms, cue.kind));
     cues
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BrowserExt {
+    Missing,
+    Present(PathBuf),
+    Refused,
+}
+
+/// The DAT already has a validated, plain parent. Resolve only its sibling:
+/// an exact-path fast path, or one strict leaf listing for case variants.
+/// Refused and ambiguous entries must not be mistaken for genuine absence.
+fn browser_ext_sibling(dat: &Path) -> BrowserExt {
+    use unicode_normalization::UnicodeNormalization;
+    let ext = dat.with_extension("EXT");
+    match std::fs::symlink_metadata(&ext) {
+        Ok(meta) => return if meta.file_type().is_file() { BrowserExt::Present(ext) } else { BrowserExt::Refused },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return BrowserExt::Refused,
+    }
+    let Some(parent) = ext.parent() else { return BrowserExt::Refused };
+    let Some(name) = ext.file_name().and_then(|name| name.to_str()) else { return BrowserExt::Refused };
+    let wanted = name.nfc().collect::<String>().to_lowercase();
+    let Ok(entries) = std::fs::read_dir(parent) else { return BrowserExt::Refused };
+    let mut found = None;
+    for entry in entries {
+        let Ok(entry) = entry else { return BrowserExt::Refused };
+        if entry.file_name().to_str().is_some_and(|name| name.nfc().collect::<String>().to_lowercase() == wanted) {
+            if found.is_some() { return BrowserExt::Refused; }
+            found = Some(entry.path());
+        }
+    }
+    let Some(path) = found else { return BrowserExt::Missing };
+    match std::fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_file() => BrowserExt::Present(path),
+        _ => BrowserExt::Refused,
+    }
 }
 
 fn read_browser_ext(path: &Path, remaining: &mut u64) -> Option<rbl_anlz::Anlz> {
@@ -2182,6 +2223,154 @@ mod tests {
     }
 
     #[test]
+    fn dat_only_browser_cues_match_the_existing_loaded_route_without_writes() {
+        let rig = rig_with(analysed_on_the_stick);
+        let mount = rig.stick.path();
+        let legacy = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = legacy.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+        let dat = assets_of(mount, Format::DeviceLibrary, track).1.analysis_dat().unwrap();
+        std::fs::remove_file(dat.with_extension("EXT")).unwrap();
+        assert_eq!(rbl_anlz::Anlz::read(&dat).unwrap().legacy_cue_entries().len(), 2);
+        let before = contents_under(mount);
+        for format in [Format::DeviceLibrary, Format::OneLibrary] {
+            let library = device::read(mount, format).unwrap();
+            let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+            let mut row = device_row(mount, track, 0);
+            let loaded = tauri::async_runtime::block_on(device_track_cues(
+                mount.to_string_lossy().into_owned(), format_name(format).into(), track.id,
+                rbl_index::folder::loose_id(&row.path),
+            )).unwrap();
+            assert_eq!(loaded.len(), 2, "{format:?}: existing loaded route reads DAT");
+            let one_cues = if format == Format::OneLibrary { one_library_cues(mount) } else { HashMap::new() };
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            row.cues = device_cues(mount, track, format, &one_cues, &mut remaining);
+            let view = DeviceView::open(vec![row], &rbl_index::ViewSpec {
+                source: rbl_index::TrackSource::Collection, sort: rbl_index::SortColumn::TrackNo,
+                descending: false, query: String::new(), filter: rbl_index::TrackFilter::default(),
+            }, rbl_index::SearchField::All);
+            let fetched = fetch_rows(&view, 0, 1).unwrap();
+            assert_eq!(fetched[0].hot_cues.iter().map(|cue| (cue.0, cue.1)).collect::<Vec<_>>(), [('A', 25)], "{format:?}: browser hot cue");
+            assert_eq!(fetched[0].memory_cues, [494], "{format:?}: browser memory loop");
+            if format == Format::DeviceLibrary {
+                assert_eq!(remaining, MAX_BROWSER_EXT_VIEW_BYTES - std::fs::metadata(&dat).unwrap().len());
+            }
+        }
+        assert_eq!(contents_under(mount), before, "browsing and loading leave device bytes unchanged");
+    }
+
+    #[test]
+    fn browser_ext_sibling_resolves_only_unique_plain_case_variants() {
+        let root = tempfile::tempdir().unwrap();
+        let dat = root.path().join("ANLZ0000.DAT");
+        std::fs::write(&dat, b"fixture DAT").unwrap();
+        assert_eq!(browser_ext_sibling(&dat), BrowserExt::Missing);
+        let exact = dat.with_extension("EXT");
+        std::fs::write(&exact, b"exact sibling").unwrap();
+        assert_eq!(browser_ext_sibling(&dat), BrowserExt::Present(exact.clone()));
+        let lower = dat.with_file_name("anlz0000.ext");
+        std::fs::rename(&exact, &lower).unwrap();
+        let BrowserExt::Present(found) = browser_ext_sibling(&dat) else { panic!("unique case variant was not resolved") };
+        assert_eq!(std::fs::read(found).unwrap(), b"exact sibling");
+        // Case-insensitive hosts answer the exact spelling already. A
+        // case-sensitive host must refuse two non-exact folded matches.
+        if std::fs::symlink_metadata(&exact).is_err() {
+            let other = dat.with_file_name("Anlz0000.Ext");
+            std::fs::write(&other, b"ambiguous sibling").unwrap();
+            assert_eq!(browser_ext_sibling(&dat), BrowserExt::Refused);
+            std::fs::remove_file(other).unwrap();
+        }
+        std::fs::remove_file(lower).unwrap();
+        std::fs::create_dir(&exact).unwrap();
+        assert_eq!(browser_ext_sibling(&dat), BrowserExt::Refused);
+    }
+
+    #[test]
+    fn dat_only_browser_reads_respect_file_and_shared_view_limits() {
+        let rig = rig_with(analysed_on_the_stick);
+        let mount = rig.stick.path();
+        let library = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+        let dat = assets_of(mount, Format::DeviceLibrary, track).1.analysis_dat().unwrap();
+        std::fs::remove_file(dat.with_extension("EXT")).unwrap();
+        let size = std::fs::metadata(&dat).unwrap().len();
+        for limit in [0, size - 1] {
+            let mut remaining = limit;
+            assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+            assert_eq!(remaining, limit, "over-budget DAT is not read");
+        }
+        let mut remaining = size * 2;
+        for _ in 0..2 {
+            assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).len(), 2);
+        }
+        assert_eq!(remaining, 0);
+        assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+        let mut oversized = rbl_anlz::Anlz::read(&dat).unwrap();
+        oversized.sections.push(rbl_anlz::Section::new(b"JUNK", Vec::new(), vec![0; usize::try_from(MAX_BROWSER_EXT_BYTES).unwrap()]));
+        std::fs::write(&dat, oversized.to_bytes()).unwrap();
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+        assert_eq!(remaining, MAX_BROWSER_EXT_VIEW_BYTES, "oversized DAT is not read");
+    }
+
+    #[test]
+    fn dat_browser_fallback_never_overrides_a_present_ext() {
+        let rig = rig_with(analysed_on_the_stick);
+        let mount = rig.stick.path();
+        let library = device::read(mount, Format::DeviceLibrary).unwrap();
+        let track = library.tracks.iter().find(|track| track.title == "Track 0").unwrap();
+        let dat = assets_of(mount, Format::DeviceLibrary, track).1.analysis_dat().unwrap();
+        let ext = dat.with_extension("EXT");
+        let empty = rbl_anlz::AnlzBuilder::new().finish();
+        for bytes in [empty.as_slice(), b"invalid present EXT"] {
+            std::fs::write(&ext, bytes).unwrap();
+            let before = contents_under(mount);
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+            assert_eq!(remaining, MAX_BROWSER_EXT_VIEW_BYTES - bytes.len() as u64);
+            assert_eq!(contents_under(mount), before);
+        }
+        std::fs::write(&ext, empty).unwrap();
+        let lower = ext.with_file_name("anlz0000.ext");
+        std::fs::rename(&ext, &lower).unwrap();
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        assert!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty(), "case-variant empty EXT remains authoritative");
+        std::fs::remove_file(&lower).unwrap();
+        std::fs::create_dir(&ext).unwrap();
+        let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+        assert!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty(), "present non-file EXT is not absence");
+        std::fs::remove_dir(&ext).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(&ext, rbl_anlz::AnlzBuilder::new().finish()).unwrap();
+            std::fs::set_permissions(&ext, std::fs::Permissions::from_mode(0o0)).unwrap();
+            // Privileged runners can still read a mode-000 file. Match the
+            // actual access result rather than assuming the runner's UID.
+            let denied = std::fs::File::open(&ext).is_err();
+            let length = std::fs::metadata(&ext).unwrap().len();
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            let unreadable = device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining);
+            std::fs::set_permissions(&ext, std::fs::Permissions::from_mode(0o600)).unwrap();
+            assert_eq!(unreadable, [] as [rbl_index::Cue; 0], "present EXT is not absence");
+            assert_eq!(remaining, MAX_BROWSER_EXT_VIEW_BYTES - if denied { 0 } else { length });
+            std::fs::remove_file(&ext).unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let target = outside.path().join("ANLZ0000.EXT");
+            std::fs::write(&target, rbl_anlz::Anlz::read(&dat).unwrap().to_bytes()).unwrap();
+            for link in [&ext, &lower] {
+                std::os::unix::fs::symlink(&target, link).unwrap();
+                let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+                assert!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty(), "outside EXT link is not absence");
+                assert_eq!(remaining, MAX_BROWSER_EXT_VIEW_BYTES);
+                std::fs::remove_file(link).unwrap();
+            }
+            std::os::unix::fs::symlink(outside.path().join("missing"), &ext).unwrap();
+            let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
+            assert!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).is_empty(), "dangling EXT is present");
+        }
+    }
+
+    #[test]
     fn a_copied_track_brings_the_sticks_bpm_key_waveform_grid_and_cues() {
         // #568: the copy came in as a bare file, its BPM, waveform, cues and
         // key lost. rekordbox gives each track it copies the device's row,
@@ -2950,7 +3139,7 @@ mod tests {
         assert_eq!(contents_under(mount), before, "browsing must not write to the stick");
         std::fs::remove_file(&ext).unwrap();
         let mut remaining = MAX_BROWSER_EXT_VIEW_BYTES;
-        assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining), [] as [rbl_index::Cue; 0]);
+        assert_eq!(device_cues(mount, track, Format::DeviceLibrary, &HashMap::new(), &mut remaining).len(), 2, "absent EXT permits the bounded DAT fallback");
         assert_ne!(device_cues(mount, track, Format::OneLibrary, &one_library_cues(mount), &mut remaining), [] as [rbl_index::Cue; 0]);
     }
 
