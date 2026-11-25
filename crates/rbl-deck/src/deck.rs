@@ -130,6 +130,8 @@ struct Worker {
     events: EventSink,
     streamer: Option<Streamer>,
     generation: u32,
+    #[cfg(test)]
+    before_seek_publication: Option<Box<dyn FnOnce() -> Option<DeckError> + Send>>,
     /// The read head, present only while a drag is running.
     scrubber: Option<Scrubber>,
     /// When the pointer last reported, so the next one can be timed.
@@ -204,6 +206,8 @@ impl Worker {
             events,
             streamer: None,
             generation: 0,
+            #[cfg(test)]
+            before_seek_publication: None,
             scrubber: None,
             last_report: None,
             window: PcmWindow::empty(),
@@ -553,7 +557,13 @@ impl Worker {
     fn seek(&mut self, frame: u64) {
         self.forget_input();
         let Some(streamer) = self.streamer.as_mut() else { return };
-        match streamer.seek(frame) {
+        let result = streamer.seek(frame);
+        #[cfg(test)]
+        let result = match self.before_seek_publication.take() {
+            Some(before) => before().map_or(result, Err),
+            None => result,
+        };
+        match result {
             Ok(landed) => {
                 self.clock.set_end_of_stream(false);
                 // The position first, then the generation: the callback reads
@@ -1065,6 +1075,17 @@ mod tests {
             self.worker.handle(Command::Seek(from));
         }
 
+        /// Publish a control-side seek before its worker command is handled,
+        /// matching `Engine::seek_with_pre_roll` without timing a real thread.
+        fn request_seek(&self, frame: u64) -> Command {
+            self.clock.set_pre_roll(0);
+            self.clock.rearm_active_before(frame);
+            self.clock.set_position(frame);
+            self.clock.set_start_in(0);
+            self.clock.bump_generation();
+            Command::Seek(frame)
+        }
+
         /// Everything the decode thread queues, until at least `frames`.
         fn render(&mut self, frames: usize) -> Render {
             let mut out = Render { frames: Vec::new(), blocks: Vec::new() };
@@ -1081,6 +1102,167 @@ mod tests {
                 assert!(idle < 4, "the deck stopped producing after {} frames", out.frames.len());
             }
             out
+        }
+    }
+
+    #[test]
+    fn queued_seeks_do_not_relabel_intermediate_audio_as_the_latest_target() {
+        let mut rig = Rig::new(1.0, false);
+        let first = rig.request_seek(8_192);
+        let latest = rig.request_seek(24_576);
+        let generation = rig.clock.generation();
+        rig.worker.handle(first);
+        let after_first = rig.clock.position();
+        // Worker::run produces up to a ring after each command, even when
+        // another command is already waiting in its channel.
+        for _ in 0..RING_BLOCKS { rig.worker.produce(); }
+        rig.worker.handle(latest);
+        assert_eq!(rig.clock.position(), 24_576);
+        let mut stale = Vec::new();
+        while let Ok(block) = rig.ring.pop() {
+            // DeckReader accepts this generation as current. Include actual
+            // generated PCM identity, not merely the block's position label.
+            if block.generation >= generation && block.position < 24_576 {
+                stale.push((block.position, block.generation, source(block.samples[0]) as u64));
+            }
+        }
+        let final_audio = rig.render(BLOCK_FRAMES);
+        assert_eq!(final_audio.blocks[0].0, 24_576);
+        assert!((final_audio.frames[0] - 24_576.0).abs() < 1.0);
+        assert_eq!((after_first, stale), (24_576, Vec::new()),
+            "an older seek completion must not replace the latest clock or lend its generation to intermediate PCM");
+    }
+
+    #[test]
+    fn a_single_seek_publishes_matching_clock_buffer_and_generated_pcm() {
+        let mut rig = Rig::new(1.0, false);
+        let request = rig.request_seek(8_192);
+        let generation = rig.clock.generation();
+        rig.worker.handle(request);
+        assert_eq!(rig.clock.position(), 8_192);
+        assert!(rig.worker.produce());
+        let block = rig.ring.pop().unwrap();
+        assert_eq!((block.position, block.generation), (8_192, generation));
+        assert!((source(block.samples[0]) - 8_192.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn a_later_seek_retires_audio_prepared_before_its_clock_publication() {
+        let mut rig = Rig::new(1.0, false);
+        let first = rig.request_seek(8_192);
+        rig.worker.handle(first);
+        assert!(rig.worker.produce());
+        let latest = rig.request_seek(24_576);
+        let generation = rig.clock.generation();
+        rig.worker.handle(latest);
+        let old = rig.ring.pop().unwrap();
+        assert!(old.generation < generation);
+        let final_audio = rig.render(BLOCK_FRAMES);
+        assert_eq!(final_audio.blocks[0].0, 24_576);
+        assert!((final_audio.frames[0] - 24_576.0).abs() < 1.0);
+        assert_eq!(rig.clock.position(), 24_576);
+    }
+
+    #[test]
+    fn latest_explicit_seek_survives_an_earlier_scrub_end_generation_change() {
+        let mut rig = Rig::new(1.0, false);
+        rig.worker.handle(Command::ScrubBegin);
+        let latest = rig.request_seek(24_576);
+        let requested_generation = rig.clock.generation();
+        // SCRUB END was already queued when the new explicit seek arrived.
+        // Its internal restart legitimately advances the general generation.
+        rig.worker.handle(Command::ScrubEnd);
+        assert!(rig.clock.generation() > requested_generation);
+        rig.worker.handle(latest);
+        assert_eq!(rig.clock.position(), 24_576);
+        let final_audio = rig.render(BLOCK_FRAMES);
+        assert_eq!(final_audio.blocks[0].0, 24_576);
+        assert!((final_audio.frames[0] - 24_576.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn a_seek_started_before_a_new_request_cannot_publish_over_it() {
+        let mut rig = Rig::new(1.0, false);
+        let first = rig.request_seek(8_192);
+        let pending = Arc::new(std::sync::Mutex::new(None));
+        let clock = Arc::clone(&rig.clock);
+        let requested = Arc::clone(&pending);
+        rig.worker.before_seek_publication = Some(Box::new(move || {
+            // The real Streamer seek already returned; its old completion
+            // has not published. This is a deterministic blocking-I/O window.
+            clock.set_pre_roll(0);
+            clock.rearm_active_before(24_576);
+            clock.set_position(24_576);
+            clock.set_start_in(0);
+            clock.bump_generation();
+            *requested.lock().unwrap() = Some(Command::Seek(24_576));
+            None
+        }));
+        rig.worker.handle(first);
+        let published = rig.clock.position();
+        assert!(rig.worker.produce());
+        let old = rig.ring.pop().unwrap();
+        let accepted = old.generation >= rig.clock.generation();
+        let latest = pending.lock().unwrap().take().unwrap();
+        rig.worker.handle(latest);
+        let final_audio = rig.render(BLOCK_FRAMES);
+        assert_eq!(final_audio.blocks[0].0, 24_576);
+        assert!((final_audio.frames[0] - 24_576.0).abs() < 1.0);
+        assert_eq!((published, accepted), (24_576, false),
+            "request received during demux seek must retire the old completion and PCM");
+    }
+
+    #[test]
+    fn seek_completion_retains_the_latest_pre_roll_and_scheduled_start() {
+        for wait in [0, 2_205] {
+            let mut rig = Rig::new(1.0, false);
+            let first = rig.request_seek(8_192);
+            let latest = rig.request_seek(0);
+            rig.clock.set_pre_roll(4_410);
+            // play_after installs its wait after an explicit/EOF seek is sent.
+            rig.clock.set_start_in(wait);
+            rig.worker.handle(first);
+            rig.worker.handle(latest);
+            assert_eq!((rig.clock.position(), rig.clock.pre_roll(), rig.clock.start_in()),
+                (0, 4_410, wait));
+        }
+    }
+
+    #[test]
+    fn seek_errors_belong_to_the_request_that_failed_and_do_not_block_a_later_seek() {
+        for retired in [false, true] {
+            let mut rig = Rig::new(1.0, false);
+            let errors = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let received = Arc::clone(&errors);
+            rig.worker.events = Arc::new(move |event| {
+                if let DeckEvent::Error { message, .. } = event {
+                    received.lock().unwrap().push(message);
+                }
+            });
+            let first = rig.request_seek(8_192);
+            let pending = Arc::new(std::sync::Mutex::new(None));
+            let clock = Arc::clone(&rig.clock);
+            let requested = Arc::clone(&pending);
+            rig.worker.before_seek_publication = Some(Box::new(move || {
+                if retired {
+                    clock.set_position(24_576);
+                    clock.bump_generation();
+                    *requested.lock().unwrap() = Some(Command::Seek(24_576));
+                }
+                // Fault injection at completion, after the actual generated
+                // source seek, models an old I/O error without changing media.
+                Some(DeckError::Decode("generated seek failure".into()))
+            }));
+            rig.worker.handle(first);
+            let latest = if retired { pending.lock().unwrap().take().unwrap() }
+                else { rig.request_seek(24_576) };
+            rig.worker.handle(latest);
+            let final_audio = rig.render(BLOCK_FRAMES);
+            assert_eq!(rig.clock.position(), 24_576);
+            assert_eq!(final_audio.blocks[0].0, 24_576);
+            assert!((final_audio.frames[0] - 24_576.0).abs() < 1.0);
+            assert_eq!(errors.lock().unwrap().len(), usize::from(!retired),
+                "only the current failure may be reported; retired={retired}");
         }
     }
 
