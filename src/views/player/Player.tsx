@@ -2492,6 +2492,7 @@ export const Player = memo(function Player({
               {track && hasWaveform ? (
                 <WaveformDetail
                   trackId={track.id}
+                  loadIntent={loadIntent}
                   progress={0.5}
                   span={1}
                   width={overview.width}
@@ -2674,6 +2675,7 @@ export const Player = memo(function Player({
                   // can then cross from one byte layout into the other.
                   key={bars <= 0.5 ? "pcm" : "pwv7"}
                   trackId={track.id}
+                  loadIntent={loadIntent}
                   progress={anchor}
                   span={span * OVERDRAW}
                   durationMs={total * 1000}

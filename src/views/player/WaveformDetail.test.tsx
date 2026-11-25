@@ -402,3 +402,59 @@ it.each([false, true])("refreshes a previously loaded track after analysis chang
   expect(read.mock.calls.filter(([id]) => id === a)).toHaveLength(2);
   expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), after, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
 });
+
+
+describe("explicit deck load waveform reads", () => {
+  it.each(["empty", "rejected", "positive"] as const)("retries %s only when explicitly loaded again", async first => {
+    const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
+    const read = vi.fn().mockResolvedValue(bytes);
+    if (first === "empty") read.mockResolvedValueOnce(new Uint8Array());
+    else if (first === "rejected") read.mockRejectedValueOnce(new Error("companion unavailable"));
+    __setBackend({ trackWaveform: read, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+    const show = (loadIntent: number, progress = 0.5) => act(() => root.render(
+      <WaveformDetail trackId={`explicit-reload-${first}`} loadIntent={loadIntent} progress={progress} span={1} width={400} height={80} detail />,
+    ));
+    show(1); await settle();
+    show(1, 0.6); await settle();
+    expect(read).toHaveBeenCalledTimes(1);
+    show(2); await settle();
+    expect(read).toHaveBeenCalledTimes(first === "positive" ? 1 : 2);
+    expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+  });
+
+  it.each([false, true])("keeps a same-track pending load shared (empty=%s)", async empty => {
+    const pending = deferred<Uint8Array>();
+    const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
+    const read = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(bytes);
+    __setBackend({ trackWaveform: read, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+    const show = (loadIntent: number) => act(() => root.render(
+      <WaveformDetail trackId={`explicit-pending-${empty}`} loadIntent={loadIntent} progress={0.5} span={1} width={400} height={80} detail />,
+    ));
+    show(1); await settle();
+    show(2); await settle();
+    expect(read).toHaveBeenCalledTimes(1);
+    pending.resolve(empty ? new Uint8Array() : bytes); await settle();
+    expect(drawn.wave).toHaveBeenCalledTimes(empty ? 0 : 1);
+    show(3); await settle();
+    expect(read).toHaveBeenCalledTimes(empty ? 2 : 1);
+    expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+  });
+
+  it.each([false, true])("ignores a retired track reply after a new load commits (empty=%s)", async empty => {
+    const old = deferred<Uint8Array>();
+    const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
+    const read = vi.fn().mockReturnValueOnce(old.promise).mockResolvedValue(bytes);
+    __setBackend({ trackWaveform: read, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+    const show = (id: string, loadIntent: number) => act(() => root.render(
+      <WaveformDetail trackId={id} loadIntent={loadIntent} progress={0.5} span={1} width={400} height={80} detail />,
+    ));
+    show(`explicit-retired-A-${empty}`, 1); await settle();
+    show(`explicit-retired-B-${empty}`, 2); await settle();
+    drawn.wave.mockClear();
+    old.resolve(empty ? new Uint8Array() : new Uint8Array([1, 1, 1])); await settle();
+    expect(drawn.wave).not.toHaveBeenCalled();
+    show(`explicit-retired-B-${empty}`, 3); await settle();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+  });
+});

@@ -53,6 +53,8 @@ async function loadTag(trackId: string, palette: WavePalette, detail: boolean): 
 
 export interface WaveformDetailProps {
   trackId: string;
+  /** Accepted explicit deck loads retry missing tags without discarding good cached bytes. */
+  loadIntent?: number;
   /** How far through the track playback is, 0 to 1. */
   progress: number;
   /** How much of the track the window spans, as a fraction. 1 is all of it. */
@@ -75,7 +77,7 @@ export interface WaveformDetailProps {
 }
 
 export const WaveformDetail = memo(function WaveformDetail({
-  trackId, progress, span = 0.08, width, height, half = false, detail = false,
+  trackId, loadIntent = 0, progress, span = 0.08, width, height, half = false, detail = false,
   durationMs = 0, firstBeatMs, inset = { top: 0, bottom: 0 }, pcmWindow: requestedPcmWindow,
 }: WaveformDetailProps) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -113,7 +115,7 @@ export const WaveformDetail = memo(function WaveformDetail({
       if (live) setData(loaded);
     });
     return () => { live = false; };
-  }, [trackId, detail, palette, revision, pcmMode]);
+  }, [trackId, loadIntent, detail, palette, revision, pcmMode]);
 
   useEffect(() => () => { pendingPcm.current = null; }, [trackId, revision, pcmMode]);
 
