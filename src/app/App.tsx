@@ -78,7 +78,7 @@ import { InfoSlot } from "@/views/info/InfoSlot";
 import { MyTagPanel } from "@/views/browser/MyTagPanel";
 import { columnContextFor, useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
-import { hasLooseId, importLoose, isLooseId } from "@/lib/explorer";
+import { explorerPath, hasLooseId, importLoose, isLooseId } from "@/lib/explorer";
 import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
 import { DETAIL_BARS } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
@@ -1337,6 +1337,12 @@ function AppBody() {
     [tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates,
       advancedPrefs.folderDropClash, askFolderClash, noteSkips],
   );
+
+  const importExplorerFolder = useCallback((node: TreeNode) => {
+    const path = node.kind === "directory" ? explorerPath(node.id) : null;
+    if (path === null || readOnly) return;
+    importDroppedPathsTo("playlists", [path]);
+  }, [readOnly, importDroppedPathsTo]);
 
   const importDroppedPathsToCollection = useCallback((paths: string[]) => {
     if (readOnly) {
@@ -3258,6 +3264,7 @@ function AppBody() {
     dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
     canDropToDevicePlaylists: draggedTracks?.sourceKind !== "device", onDropDeviceTracks: addDraggedToDevice,
     draggingToDevice: draggedTracks !== null && !hasLooseId(draggedTracks.ids), onDropTracksOnDevice: exportDraggedTo,
+    onImportFolderPlaylist: importExplorerFolder,
     onDropFiles: readOnly ? undefined : importDroppedFilesTo,
     onExport: exportPlaylist, exportDevices: menuDevices, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
     onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode,
@@ -3270,7 +3277,7 @@ function AppBody() {
     onEjectDevice: ejectDevice,
     ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
   }), [
-    draggedTracks, addDraggedTo, addDraggedToDevice, exportDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, menuDevices, exportPlaylistFile,
+    draggedTracks, addDraggedTo, addDraggedToDevice, exportDraggedTo, readOnly, importDroppedFilesTo, importExplorerFolder, exportPlaylist, menuDevices, exportPlaylistFile,
     createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, expandNode,
     viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
     addPlaylistArtwork, addToShortcut, sortItems, createOnDevice, renameOnDevice, deleteOnDevice,
@@ -3484,6 +3491,7 @@ function AppBody() {
           onDropTracks={addDraggedTo}
           draggingToDevice={draggedTracks !== null && !hasLooseId(draggedTracks.ids)}
           onDropTracksOnDevice={exportDraggedTo}
+          onImportFolderPlaylist={importExplorerFolder}
           onDropFiles={readOnly ? undefined : importDroppedFilesTo}
           onExport={exportPlaylist}
           exportDevices={menuDevices}

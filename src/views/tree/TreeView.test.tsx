@@ -138,3 +138,21 @@ it("native playlist export uses the selected row and refuses a removed device de
   act(() => { expect(runCommand("exportPlaylist", { scope: "main", target: "C:\\USB : α" })).toBe(false); });
   expect(exported).toHaveBeenCalledTimes(1);
 });
+
+it("an Explorer directory imports its own node and greys the action without write access", () => {
+  const directory: TreeNode = { id: "dir:0:/Music/A Set", name: "A Set", kind: "directory", depth: 1 };
+  const imported = vi.fn();
+  for (const readOnly of [false, true]) {
+    act(() => root.render(<TreeView nodes={[directory]} selectedId={directory.id} onSelect={() => {}}
+      onImportFolderPlaylist={imported} readOnly={readOnly} />));
+    const row = host.querySelector('[data-kind="directory"]');
+    act(() => { row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    const item = document.body.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    expect(item?.textContent).toBe("Import as Playlist");
+    expect(item?.disabled).toBe(readOnly);
+    act(() => item?.click());
+    expect(imported).toHaveBeenCalledTimes(1);
+    expect(imported).toHaveBeenCalledWith(directory);
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+  }
+});

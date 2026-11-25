@@ -43,6 +43,7 @@ export type TreeAction =
   | "exportM3u8"
   | "exportTxt"
   | "createPlaylist"
+  | "importFolderPlaylist"
   | "createSmartPlaylist"
   | "editSmartPlaylist"
   | "createFolder"
@@ -238,10 +239,11 @@ export const MISSING_TRACK_MENU: readonly MenuRow<TrackAction>[] = [
  * thing from one not built yet.
  */
 export function treeMenu(
-  kind: "playlist" | "smartPlaylist" | "folder" | "collection",
+  kind: "playlist" | "smartPlaylist" | "folder" | "collection" | "directory",
   devices: readonly MenuTarget[] = [],
   hasChildren = true,
 ): readonly MenuRow<TreeAction>[] {
+  if (kind === "directory") return [{ label: "Import as Playlist", action: "importFolderPlaylist" }];
   // Sort Items, on a folder and on the Playlists heading, only while there
   // is something under it: rekordbox leaves the row out of an empty one's
   // menu rather than greying it [OBS static, rekordbox 7.2.19 arm64
@@ -551,6 +553,7 @@ const WRITES: ReadonlySet<string> = new Set([
   "autoRelocate",
   "relocate",
   "createPlaylist",
+  "importFolderPlaylist",
   "createFolder",
   "rename",
   "delete",

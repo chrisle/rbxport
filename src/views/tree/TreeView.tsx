@@ -370,7 +370,7 @@ const Row = memo(function Row({
 
 /** The tree kinds a right-click opens a menu over. */
 const MENU_KINDS: ReadonlySet<TreeNode["kind"]> = new Set([
-  "collection", "playlist", "smartPlaylist", "folder", "devicePlaylists", "deviceFolder", "devicePlaylist",
+  "directory", "collection", "playlist", "smartPlaylist", "folder", "devicePlaylists", "deviceFolder", "devicePlaylist",
 ]);
 
 /** A stick's own playlists and folders, which its menus and renames act on. */
@@ -393,6 +393,8 @@ export interface TreeViewProps {
   exportDevices?: readonly MenuTarget[];
   /** Export a playlist to a file: an m3u8 or rekordbox's tab-separated txt. */
   onExportFile?: (node: TreeNode, format: "m3u8" | "txt") => void;
+  /** Import an Explorer folder as a named playlist under Playlists. */
+  onImportFolderPlaylist?: (node: TreeNode) => void;
   /** Create, delete and rename, which the shell owns because they write. */
   onCreatePlaylist?: (parent: TreeNode) => void;
   onCreateFolder?: (parent: TreeNode) => void;
@@ -481,7 +483,7 @@ export interface TreeViewProps {
 
 export const TreeView = memo(function TreeView({
   nodes, selectedId, side = "main", onSelect, dragging, canDropToDevicePlaylists, onDropTracks, onDropDeviceTracks,
-  onDropFiles, onExport, exportDevices, onExportFile,
+  onDropFiles, onExport, exportDevices, onExportFile, onImportFolderPlaylist,
   draggingToDevice = false, onDropTracksOnDevice,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
@@ -810,12 +812,12 @@ export const TreeView = memo(function TreeView({
           x={menu.x}
           y={menu.y}
           rows={treeMenu(
-            menu.node.kind === "collection" ? "collection" : menu.node.kind === "folder" ? "folder" : menu.node.kind === "smartPlaylist" ? "smartPlaylist" : "playlist",
+            menu.node.kind === "directory" ? "directory" : menu.node.kind === "collection" ? "collection" : menu.node.kind === "folder" ? "folder" : menu.node.kind === "smartPlaylist" ? "smartPlaylist" : "playlist",
             exportDevices,
             childrenOf(nodes, menu.node.kind === "collection" ? TREE_ROOT : menu.node.id).length > 0,
           )}
-          label={menu.node.kind === "folder" ? "Folder" : menu.node.kind === "collection" ? "Playlists" : "Playlist"}
-          context={{ inPlaylist: true, hasFile: true, readOnly }}
+          label={menu.node.kind === "directory" || menu.node.kind === "folder" ? "Folder" : menu.node.kind === "collection" ? "Playlists" : "Playlist"}
+          context={{ inPlaylist: true, hasFile: true, readOnly: readOnly || (menu.node.kind === "directory" && !onImportFolderPlaylist) }}
           onChoose={(action) => {
             if (action.startsWith("exportTo:")) {
               runCommand("exportPlaylist", { scope: side, target: action.slice("exportTo:".length), subject: menu.node.id });
@@ -827,6 +829,9 @@ export const TreeView = memo(function TreeView({
                 break;
               case "exportTxt":
                 onExportFile?.(menu.node, "txt");
+                break;
+              case "importFolderPlaylist":
+                if (!readOnly && menu.node.kind === "directory") onImportFolderPlaylist?.(menu.node);
                 break;
               case "createPlaylist":
                 onCreatePlaylist?.(menu.node);
