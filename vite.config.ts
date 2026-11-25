@@ -48,6 +48,8 @@ export default defineConfig(({ mode }) => ({
         // loops and their duplicated code as stage feedback adds lazy chunks.
         stringArrayRotate: false,
         stringArrayIndexShift: false,
+        // Use the shared string accessor directly instead of per-scope wrappers.
+        stringArrayWrappersCount: 0,
         stringArrayThreshold: 0.5,
         stringArrayEncoding: [],
       });
