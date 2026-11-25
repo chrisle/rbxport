@@ -273,7 +273,9 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
             let beats = source_dat.beat_grid().unwrap_or_default();
             let previous_bpm = state.read_db(|db| Ok(db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [id], |r| r.get::<_,u32>(0))?)).map_err(write_error)?;
             let bpm = beats.first().map_or(previous_bpm, |b| u32::from(b.tempo_x100));
-            let bpm_changed = bpm != previous_bpm;
+            // The writer preserves the row BPM for raw zero. Compare that
+            // effective change while keeping the raw value for the writer.
+            let bpm_changed = bpm > 0 && bpm != previous_bpm;
             let relative = state.read_db(|db| rbl_db::write::analysis_data_path(db.connection(), id)).map_err(write_error)?;
             let target = rbl_anlz::resolve(&location.share_root, &relative);
             let mut files = Vec::new();
@@ -1750,6 +1752,63 @@ mod tests {
             for index in 1..3 { assert!(editor.has_history(&rbl_db::fixture::track_id(index))); }
             for (path, image) in source_images { assert_eq!(std::fs::read(path).unwrap(), image); }
         }
+    }
+
+    #[test]
+    fn identical_zero_tempo_import_preserves_row_revision_and_grid_undo() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, _) = library_and_stick(dir.path());
+        let local = local_analysis_for(&state, &location, 1);
+        let id = rbl_db::fixture::track_id(0);
+        let source = usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT");
+        let mut dat = rbl_anlz::Anlz::read(&source).unwrap();
+        let grid = dat.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap();
+        grid.payload[2..4].copy_from_slice(&0_u16.to_be_bytes());
+        std::fs::write(&source, dat.to_bytes()).unwrap();
+        let source_images = [source.clone(), source.with_extension("EXT")]
+            .map(|path| (path.clone(), std::fs::read(path).unwrap()));
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let import_cues = || import(&state, &editor, &usb, true, false, false, false).unwrap();
+        let first = import_cues();
+        assert_eq!(first.tracks, 1, "a changed grid and cues still import");
+        let snapshot = || state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT BPM, COALESCE(rb_local_usn,0), CAST(COALESCE(AnalysisUpdated,'') AS TEXT) FROM djmdContent WHERE ID=?1",
+            [&id], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)))?)).unwrap();
+        let before = snapshot();
+        assert_eq!(before.0, 12000, "raw zero retains the writer's existing positive BPM");
+        assert_eq!(rbl_anlz::Anlz::read(&local[0]).unwrap().beat_grid().unwrap()[0].tempo_x100, 0,
+            "accepted zero-tempo source data is unchanged by this comparison fix");
+        let local_images = [local[0].clone(), local[0].with_extension("EXT")]
+            .map(|path| (path.clone(), std::fs::read(path).ok()));
+        editor.seed_history(&id);
+        let repeated = import_cues();
+        assert_eq!((repeated.tracks, repeated.unchanged), (0, 1),
+            "identical source must be a no-op: before={before:?}, after={:?}, Undo kept={}, files unchanged={}",
+            snapshot(), editor.has_history(&id), local_images.iter().all(|(path, image)| std::fs::read(path).ok() == *image));
+        assert_eq!(repeated.changed, Vec::<String>::new());
+        assert_eq!(snapshot(), before, "the retained BPM does not create a row change");
+        assert!(editor.has_history(&id), "an unchanged import preserves grid Undo");
+        for (path, image) in local_images { assert_eq!(std::fs::read(path).ok(), image); }
+        for (path, image) in source_images { assert_eq!(std::fs::read(path).unwrap(), image); }
+
+        // A real grid change still imports with raw zero, then settles again.
+        let old_time = dat.beat_grid().unwrap()[0].time_ms;
+        dat.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap()
+            .payload[4..8].copy_from_slice(&(old_time + 125).to_be_bytes());
+        let changed_source = dat.to_bytes();
+        std::fs::write(&source, &changed_source).unwrap();
+        let changed = import_cues();
+        assert_eq!(changed.tracks, 1);
+        assert_eq!(snapshot().0, before.0, "the positive BPM is still retained");
+        assert!(!editor.has_history(&id), "a changed grid still retires its old Undo");
+        assert_eq!(rbl_anlz::Anlz::read(&local[0]).unwrap().beat_grid().unwrap()[0].time_ms, old_time + 125);
+        let changed_row = snapshot();
+        editor.seed_history(&id);
+        let settled = import_cues();
+        assert_eq!((settled.tracks, settled.unchanged), (0, 1));
+        assert_eq!(snapshot(), changed_row);
+        assert!(editor.has_history(&id));
+        assert_eq!(std::fs::read(source).unwrap(), changed_source);
     }
 
 }
