@@ -1180,7 +1180,7 @@ function AppBody() {
    * playlist and the Add To Playlist menu come here (#291).
    */
   const addTracksTo = useCallback(
-    (playlistId: string, ids: readonly string[]) => {
+    (playlistId: string, ids: readonly string[], orderedIds?: Promise<readonly string[]>) => {
       const name = tree.find((n) => n.id === playlistId)?.name ?? t("the playlist");
       jobs.add({
         label: t("Adding {count} to {name}", { count: ids.length, name }),
@@ -1192,7 +1192,7 @@ function AppBody() {
           // Rows out of the Explorer that the library does not hold are
           // imported on the way in, as rekordbox's Add To Playlist does with
           // them [OBS 7, Winrig 2026-10-08].
-          const { ids: trackIds, report: imported } = await importLoose(ids, (paths) => backend.importPaths(paths));
+          const { ids: trackIds, report: imported } = await importLoose(orderedIds ? await orderedIds : ids, (paths) => backend.importPaths(paths));
           if (imported && analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
           const tail = skippedTail(imported?.skipped ?? []);
           noteSkips(imported?.skipped ?? []);
@@ -1242,7 +1242,7 @@ function AppBody() {
         refuse(refusal(true));
         return;
       }
-      addTracksTo(playlistId, ids);
+      addTracksTo(playlistId, ids, draggedTracks?.orderedIds);
     },
     [draggedTracks, refuse, advancedPrefs.protectLibrary, addTracksTo],
   );

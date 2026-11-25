@@ -833,6 +833,8 @@ const TrackRow = memo(function TrackRow({
 export interface TrackDrag {
   /** Every track travelling: the selection, or the one row grabbed outside it. */
   ids: readonly string[];
+  /** Exact source-view order when some selected rows are outside the row cache. */
+  orderedIds?: Promise<readonly string[]> | undefined;
   /** Where the row ids came from; device ids cannot be treated as collection ids. */
   sourceKind: ViewSpec["source"]["kind"];
   /**
@@ -1682,22 +1684,44 @@ export const TrackTable = memo(function TrackTable({
       }
       // A playlist takes all of them; a deck takes the first in list order,
       // which is what rekordbox loads from a dropped selection — not the row
-      // under the hand. Found by walking the list from the top: the rows the
-      // selection was made from are in the cache, and the walk ends at the
-      // first hit. Once per drag, not per frame.
+      // under the hand. The cache walk also orders the copied rows when
+      // complete; otherwise the captured source view supplies their ranks.
+      // This happens once per drag, not per frame.
       let first = row;
       let firstIndex = index;
-      for (let i = 0; i < view.count; i += 1) {
+      const repeatedRows = spec.source.kind === "playlist" || spec.source.kind === "history" || spec.source.kind === "device";
+      const cached: string[] = [];
+      const seen = new Set<string>();
+      let allFresh = true;
+      for (let i = 0; i < view.count && (repeatedRows || seen.size < selection.ids.size); i += 1) {
         const at = view.rowAt(i);
-        if (at && selection.ids.has(at.id)) {
-          first = at;
-          firstIndex = i;
-          break;
+        if (!view.fresh(i)) allFresh = false;
+        if (at && view.fresh(i) && selection.ids.has(at.id)) {
+          if (cached.length === 0) { first = at; firstIndex = i; }
+          cached.push(at.id);
+          seen.add(at.id);
         }
       }
-      onDragTracks?.({ ids: [...selection.ids], row: first, sourceKind: spec.source.kind, position: { spec, index: firstIndex } });
+      let orderedIds: Promise<readonly string[]> | undefined;
+      const complete = seen.size === selection.ids.size && (!repeatedRows || allFresh);
+      if (view.swapping || view.loading || !complete) {
+        const chosen = selection.ids;
+        // Capture this source handle now. A drop can finish before its ranks
+        // arrive; the queued add must wait rather than copy in click order.
+        orderedIds = (view.swapping || view.loading
+          ? Promise.reject(new Error("The track list changed. Start the drag again."))
+          : listedIds()).then(listed => {
+          const ranked = listed.filter(id => chosen.has(id));
+          if (new Set(ranked).size !== chosen.size) throw new Error("The track list changed. Start the drag again.");
+          return ranked;
+        });
+        // The drag may be cancelled without a consumer awaiting the ranks.
+        void orderedIds.catch(() => {});
+      }
+      onDragTracks?.({ ids: complete ? cached : [...selection.ids], orderedIds,
+        row: first, sourceKind: spec.source.kind, position: { spec, index: firstIndex } });
     },
-    [selection.ids, onDragTracks, spec, view],
+    [selection.ids, onDragTracks, spec, view, listedIds],
   );
 
   // The ids travelling with the hand, and where they would land. Held here
