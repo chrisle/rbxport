@@ -1,9 +1,9 @@
 //! Audio placement shared by planning and staging. No media is written here.
 use super::{
+    CompatibilityFormat, ExportError, Layout, ManifestTrack, Result, SourceTrack,
     analysis_directory, analysis_slot_key, cache, copy_stamp, fat_file_name, file_hash_cancellable,
     files_equal, historical_audio_alias, incremental, is_device_gone, owns_library_file, path_key,
-    same_copy, same_file, source_stamp, under, CompatibilityFormat, ExportError, Layout,
-    ManifestTrack, Result, SourceTrack,
+    same_copy, same_file, source_stamp, under,
 };
 use std::{
     collections::BTreeSet,
@@ -671,7 +671,9 @@ pub(super) fn preflight(
         )
     };
     if required > 0 && available()? < required {
-        return Err(ExportError::Conflict(format!("Not enough temporary space to sync safely: approximately {required} bytes required while the previous library is retained")));
+        return Err(ExportError::Conflict(format!(
+            "Not enough temporary space to sync safely: approximately {required} bytes required while the previous library is retained"
+        )));
     }
     Ok(())
 }
@@ -685,6 +687,308 @@ mod tests {
             allocated: bytes,
             temporary: bytes,
         }
+    }
+
+    fn generated_wave(path: &Path, rate: u32, seconds: u32) {
+        let data = rate * 4 * seconds;
+        let mut bytes = Vec::with_capacity(44 + data as usize);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        bytes.extend_from_slice(&(rate * 4).to_le_bytes());
+        bytes.extend_from_slice(&4_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data.to_le_bytes());
+        bytes.resize(44 + data as usize, 0);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn generated_prepared_plan(
+        root: &Path,
+        plan: &crate::plan::SyncPlan,
+        previous: &crate::Manifest,
+        options: &crate::ExportOptions<'_>,
+        unchanged: &BTreeSet<String>,
+        hashes: &std::collections::BTreeMap<String, u64>,
+    ) -> Vec<PreparedTrack> {
+        let previous_in_place = crate::previous_in_place(root, Some(previous));
+        let in_place = crate::in_place_paths(root, &plan.tracks, &previous_in_place);
+        let adopted = crate::adopted_paths(
+            root,
+            &plan.tracks,
+            Some(previous),
+            &in_place,
+            options.sync.map_or(0, |source| source.db_id),
+            &mut |_| {},
+            &|| false,
+        )
+        .unwrap();
+        let kept = in_place
+            .iter()
+            .zip(&adopted)
+            .map(|(local, adopted)| local.clone().or_else(|| adopted.clone()))
+            .collect::<Vec<_>>();
+        let ids = crate::assign_ids(&plan.tracks, Some(previous));
+        let places = crate::layouts(
+            root,
+            &plan.tracks,
+            &ids,
+            "PIONEER",
+            Some(previous),
+            &kept,
+            &previous_in_place,
+        );
+        batch(
+            root,
+            &plan.tracks,
+            &ids,
+            places,
+            Some(previous),
+            "PIONEER",
+            &in_place,
+            &adopted,
+            options.compatibility,
+            options.cache,
+            unchanged,
+            hashes,
+            &|| false,
+            &mut |_, _| Ok(()),
+            false,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "actual export/plan/preparation causal fixture with independent revision and conversion controls"
+    )]
+    fn unknown_preview_still_preflights_known_ordinary_audio_copies() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = crate::SyncSource {
+            db_id: 123,
+            tree: vec![crate::SyncNode {
+                id: 10,
+                parent: 0,
+                attribute: 0,
+            }],
+            ..Default::default()
+        };
+        let options = crate::ExportOptions {
+            sync: Some(&source),
+            ..Default::default()
+        };
+        let playlist = |indices| crate::SourcePlaylist {
+            id: 10,
+            name: "Generated".into(),
+            track_indices: indices,
+            ..Default::default()
+        };
+        let mut unexpectedly_accepted = Vec::new();
+        for changed_bytes in [false, true] {
+            let base = temporary.path().join(if changed_bytes {
+                "changed-bytes"
+            } else {
+                "mtime-only"
+            });
+            std::fs::create_dir_all(&base).unwrap();
+            let root = base.join("stick");
+            let paths = [base.join("a.wav"), base.join("b.wav"), base.join("c.wav")];
+            for (index, path) in paths.iter().enumerate() {
+                generated_wave(path, 44_100, if index == 2 { 8 } else { 1 });
+            }
+            let tracks: Vec<_> = paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| SourceTrack {
+                    id: index as u64 + 1,
+                    source_path: path.clone(),
+                    title: format!("Generated{index}"),
+                    duration_sec: if index == 2 { 8 } else { 1 },
+                    ..Default::default()
+                })
+                .collect();
+            let initial = crate::export_with_options(
+                &root,
+                &tracks[..1],
+                &[playlist(vec![0])],
+                &[],
+                &options,
+                &mut |_| {},
+            )
+            .unwrap();
+            assert!(initial.verified);
+            let previous = crate::Manifest::load(&root).unwrap();
+            let a_key = crate::track_key(tracks[0].id, &tracks[0].source_path.to_string_lossy());
+            let old = previous
+                .tracks
+                .iter()
+                .find(|entry| entry.key() == a_key)
+                .unwrap();
+            let published_audio = root.join(old.audio.trim_start_matches('/'));
+            let audio_before = std::fs::read(&published_audio).unwrap();
+            let audio_time = std::fs::metadata(&published_audio)
+                .unwrap()
+                .modified()
+                .unwrap();
+            let database_files = [
+                "rekordbox/export.pdb",
+                "rekordbox/exportExt.pdb",
+                "rekordbox/exportLibrary.db",
+                "rbxport/manifest.json",
+            ]
+            .map(|relative| {
+                let path = root.join("PIONEER").join(relative);
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            });
+            let previous_time = std::fs::metadata(&paths[0]).unwrap().modified().unwrap();
+            if changed_bytes {
+                let mut bytes = std::fs::read(&paths[0]).unwrap();
+                bytes[44] = 1;
+                std::fs::write(&paths[0], bytes).unwrap();
+            }
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&paths[0])
+                .unwrap()
+                .set_modified(previous_time + std::time::Duration::from_secs(2))
+                .unwrap();
+            let lists = [playlist(vec![0, 1, 2])];
+            let plan = crate::plan::preview(&root, &tracks, &lists, &[], &options).unwrap();
+            assert!(
+                plan.unknown_size,
+                "same-size revision makes preview uncertainty reachable"
+            );
+            let hash = file_hash_cancellable(&paths[0], &|| false).unwrap();
+            let mut unchanged = BTreeSet::new();
+            if old.audio_hash != 0 && old.audio_hash == hash {
+                unchanged.insert(a_key.clone());
+            }
+            assert_eq!(unchanged.contains(&a_key), !changed_bytes);
+            let hashes = std::collections::BTreeMap::from([(a_key, hash)]);
+            let prepared =
+                generated_prepared_plan(&root, &plan, &previous, &options, &unchanged, &hashes);
+            assert_eq!(prepared.len(), 3);
+            for (index, entry) in prepared.iter().enumerate() {
+                let Ok(AudioPreparation::Ready(audio)) = entry else {
+                    panic!("all generated inputs must prepare")
+                };
+                assert!(audio.placement.conversion.is_none());
+                assert_eq!(audio.writes_audio(), index != 0 || changed_bytes);
+                assert_eq!(audio.unchanged, index == 0 && !changed_bytes);
+            }
+            let unit = crate::plan::allocation_unit(&root);
+            let trusted = incremental::trusted_paths(&root, Some(&previous)).unwrap();
+            let overlap = overlap_space(&root, Some(&previous), &prepared, &trusted, unit).unwrap();
+            assert_eq!(overlap.allocated, 0);
+            let small = crate::plan::allocation(std::fs::metadata(&paths[1]).unwrap().len(), unit);
+            let large = crate::plan::allocation(std::fs::metadata(&paths[2]).unwrap().len(), unit);
+            let available = small + unit;
+            assert!(available >= small && available < large);
+            assert!(
+                preflight(
+                    &prepared,
+                    plan.peak_bytes,
+                    plan.overlap_bytes,
+                    overlap,
+                    false,
+                    || Ok(available)
+                )
+                .is_err(),
+                "known-plan control refuses the same bound"
+            );
+            let queried = std::cell::Cell::new(false);
+            let result = preflight(
+                &prepared,
+                plan.peak_bytes,
+                plan.overlap_bytes,
+                overlap,
+                plan.unknown_size,
+                || {
+                    queried.set(true);
+                    Ok(available)
+                },
+            );
+            eprintln!(
+                "ordinary_copy_probe changed_bytes={changed_bytes} preview_unknown={} small={small} large={large} available={available} capacity_queried={} accepted={}",
+                plan.unknown_size,
+                queried.get(),
+                result.is_ok()
+            );
+            unexpectedly_accepted.push(result.is_ok());
+            assert_eq!(std::fs::read(&published_audio).unwrap(), audio_before);
+            assert_eq!(
+                std::fs::metadata(&published_audio)
+                    .unwrap()
+                    .modified()
+                    .unwrap(),
+                audio_time
+            );
+            for (path, bytes) in database_files {
+                assert_eq!(std::fs::read(path).unwrap(), bytes);
+            }
+            assert!(!crate::recovery_pending(&root));
+        }
+        // An unknown conversion's original source length is not its output
+        // allocation. Preserve that distinction rather than guessing a floor.
+        let root = temporary.path().join("unknown-conversion");
+        let path = temporary.path().join("96khz.wav");
+        generated_wave(&path, 96_000, 1);
+        let track = SourceTrack {
+            id: 4,
+            source_path: path,
+            title: "Generated conversion".into(),
+            duration_sec: 0,
+            ..Default::default()
+        };
+        let converted = crate::ExportOptions {
+            compatibility: Some(CompatibilityFormat::Aiff),
+            ..Default::default()
+        };
+        let empty = crate::Manifest {
+            generation: None,
+            db_id: 0,
+            baseline: None,
+            version: crate::manifest::MANIFEST_VERSION,
+            written: String::new(),
+            tracks: Vec::new(),
+            playlists: Vec::new(),
+            loose: Vec::new(),
+        };
+        let plan =
+            crate::plan::preview(&root, &[track], &[playlist(vec![0])], &[], &converted).unwrap();
+        assert!(plan.unknown_size);
+        let prepared = generated_prepared_plan(
+            &root,
+            &plan,
+            &empty,
+            &converted,
+            &BTreeSet::new(),
+            &std::collections::BTreeMap::new(),
+        );
+        let Ok(AudioPreparation::Ready(audio)) = &prepared[0] else {
+            panic!("valid generated conversion")
+        };
+        assert!(audio.writes_audio() && audio.placement.conversion.is_some());
+        preflight(
+            &prepared,
+            plan.peak_bytes,
+            0,
+            OverlapSpace::default(),
+            true,
+            || Ok(0),
+        )
+        .unwrap();
+        assert!(
+            unexpectedly_accepted.iter().all(|accepted| !accepted),
+            "known ordinary copies must refuse this constrained capacity even when preview was uncertain"
+        );
     }
 
     #[test]
@@ -775,10 +1079,12 @@ mod tests {
 
     #[test]
     fn preflight_preserves_original_and_saturated_peaks() {
-        assert!(preflight(&[], u64::MAX, u64::MAX, overlap(1), false, || Ok(
-            u64::MAX - 1
-        ))
-        .is_err());
+        assert!(
+            preflight(&[], u64::MAX, u64::MAX, overlap(1), false, || Ok(
+                u64::MAX - 1
+            ))
+            .is_err()
+        );
         assert!(preflight(&[], 100, 90, overlap(1), false, || Ok(99)).is_err());
         assert!(preflight(&[], 100, 0, overlap(50), false, || Ok(149)).is_err());
         preflight(&[], 100, 0, overlap(50), false, || Ok(150)).unwrap();
