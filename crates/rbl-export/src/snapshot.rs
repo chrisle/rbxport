@@ -84,7 +84,7 @@ fn log_read_error(query: &'static str, error: &rusqlite::Error) {
         _ => (None, "query"),
     };
     let column_index = column_index.filter(|index| *index != usize::MAX);
-    tracing::warn!(query, ?column_index, error_kind, "OneLibrary snapshot read failed");
+    tracing::warn!(read_group = query, ?column_index, error_kind, "OneLibrary snapshot read failed");
 }
 
 fn read_error(query: &'static str, error: rusqlite::Error) -> ExportError {
