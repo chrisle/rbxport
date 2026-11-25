@@ -318,6 +318,31 @@ pub fn same_root(left: &Path, right: &Path) -> std::io::Result<bool> {
     same_file::is_same_file(left, right)
 }
 
+/// An ephemeral grouping key for an already-open file. Not a durable receipt:
+/// IDs can change or be reused after replacement. No handle is retained.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FileIdentity(u64, u64);
+
+#[cfg(unix)]
+pub fn file_identity(file: &std::fs::File) -> std::io::Result<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    Ok(FileIdentity(metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+pub fn file_identity(file: &std::fs::File) -> std::io::Result<FileIdentity> {
+    // Same locked API as same-file and VolumeIdentity. Equal keys may be
+    // conservative on filesystems with nonunique IDs (for example ReFS).
+    let info = winapi_util::file::information(file)?;
+    Ok(FileIdentity(info.volume_serial_number(), info.file_index()))
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn file_identity(_file: &std::fs::File) -> std::io::Result<FileIdentity> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "file identity unavailable"))
+}
+
 /// Holds the directory identity across planning and staging, including Windows.
 /// Reusing a mount path for another device must not redirect an active export.
 pub struct VolumeIdentity { handle: same_file::Handle, seen: String }
@@ -1247,6 +1272,21 @@ mod tests {
     fn handle_description(handle: &same_file::Handle) -> String {
         let info = winapi_util::file::information(handle.as_file()).unwrap();
         format!("volume {} file index {}", info.volume_serial_number(), info.file_index())
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn destination_file_identity_matches_hardlinks_and_distinguishes_equal_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.bin");
+        let alias = dir.path().join("alias.bin");
+        let other = dir.path().join("other.bin");
+        std::fs::write(&first, b"same bytes").unwrap();
+        std::fs::hard_link(&first, &alias).unwrap();
+        std::fs::write(&other, b"same bytes").unwrap();
+        let key = |path: &Path| file_identity(&std::fs::File::open(path).unwrap()).unwrap();
+        assert_eq!(key(&first), key(&alias));
+        assert_ne!(key(&first), key(&other));
     }
 
     // Interleave replacement at the private phases, not with a timing race:

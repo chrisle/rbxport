@@ -72,6 +72,27 @@ fn read_import_anlz_file(mut file: std::fs::File, stage: &str, extension: &str, 
     }
     rbl_anlz::parse(&bytes).map_err(|e| err(format!("{stage} {extension} for track {id}: {e}")))
 }
+// Identity is captured from the same handle whose bytes are parsed. A
+// failed identity query is not a new failure for the existing full importer.
+fn read_import_anlz_identified(path: &Path, stage: &str, extension: &str, id: &str)
+    -> AppResult<(rbl_anlz::Anlz, Option<rbl_core::durable::FileIdentity>)> {
+    let file = std::fs::File::open(path).map_err(|e| err(format!("{stage} {extension} for track {id}: {e}")))?;
+    let identity = rbl_core::durable::file_identity(&file).ok();
+    Ok((read_import_anlz_file(file, stage, extension, id)?, identity))
+}
+
+fn strict_import_grid(anlz: &rbl_anlz::Anlz) -> AppResult<Option<&rbl_anlz::Section>> {
+    let mut grids = anlz.sections.iter().filter(|section| section.tag.0 == *b"PQTZ");
+    let Some(grid) = grids.next() else { return Ok(None); };
+    if grids.next().is_some() { return Err(err("USB DAT has ambiguous PQTZ sections")); }
+    let count = grid.header.get(8..12).and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+        .map(u32::from_be_bytes).ok_or_else(|| err("USB DAT has an incomplete PQTZ header"))?;
+    let bytes = usize::try_from(count).ok().and_then(|count| count.checked_mul(8))
+        .ok_or_else(|| err("USB DAT PQTZ count exceeds the supported length"))?;
+    if grid.payload.len() != bytes { return Err(err("USB DAT PQTZ count does not match its payload")); }
+    Ok((count > 0).then_some(grid))
+}
+
 fn within(root: &Path, relative: &str) -> AppResult<PathBuf> {
     let path = root.join(relative.trim_start_matches('/')).canonicalize().map_err(err)?;
     if !path.starts_with(root.canonicalize().map_err(err)?) { return Err(err("File lies outside the USB device")); }
@@ -113,7 +134,7 @@ pub(crate) fn settings_stash(state_dir: &Path) -> PathBuf {
 #[serde(rename_all="camelCase")]
 pub struct ImportReport {
     tracks: usize, histories: usize, settings: usize, ratings: usize, skipped: usize,
-    /// Tracks whose cues and grid on the stick already match the library.
+    /// Tracks whose available import data already matches the library.
     unchanged: usize,
     warnings: Vec<String>,
     #[serde(skip)] changed: Vec<String>,
@@ -229,6 +250,13 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
         fs2::FileExt::lock_exclusive(&marker).map_err(err)?;
         let mut staged_bytes = 0;
         let mut prepared = Vec::new();
+        let mut grid_only_tracks = 0usize;
+        let mut grid_images = HashMap::new();
+        let mut ambiguous_grids = HashSet::new();
+        let mut grid_noops = Vec::new();
+        let mut full_paths = HashSet::new();
+        let mut unknown_full_identity = false;
+        let mut unavailable_grid_identity = 0usize;
         let mut ordered: Vec<_> = tracks.values().collect();
         ordered.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         for (id, analysis) in ordered {
@@ -261,12 +289,26 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
             let source_cues = if has_source_ext {
                 read_import_anlz(&within(root, &ext_relative.to_string_lossy())?, "USB", "EXT", id)?
             } else { source_dat.clone() };
-            if source_cues.section(b"PCO2").is_none() { report.skipped += 1; continue; }
-            let entries = source_cues.strict_cue_entries().map_err(|e| {
+            let grid_only = source_cues.section(b"PCO2").is_none();
+            if grid_only {
+                if has_source_ext { report.skipped += 1; continue; }
+                if !std::fs::symlink_metadata(&source_path).map_err(err)?.file_type().is_file() {
+                    return Err(err("Legacy grid import requires a plain DAT file"));
+                }
+                // An unreadable, linked, mixed-case or ambiguous companion
+                // cannot authorize a fallback to the legacy projection.
+                match crate::device_library::browser_ext_sibling(&source) {
+                    crate::device_library::BrowserExt::Missing => {},
+                    crate::device_library::BrowserExt::Present(_) => { report.skipped += 1; continue; },
+                    crate::device_library::BrowserExt::Refused => return Err(err(format!("USB EXT for track {id}: companion is unavailable or ambiguous"))),
+                }
+                if strict_import_grid(&source_dat)?.is_none() { report.skipped += 1; continue; }
+            }
+            let entries = if grid_only { None } else { Some(source_cues.strict_cue_entries().map_err(|e| {
                 let extension = if has_source_ext { "EXT" } else { "DAT" };
                 err(format!("USB {extension} for track {id}: {e}"))
-            })?;
-            if entries.iter().any(|c| c.hot_cue > 16 || !matches!(c.kind, 1 | 2) || (c.kind == 2 && c.loop_time_ms <= c.time_ms)) {
+            })?) };
+            if entries.iter().flatten().any(|c| c.hot_cue > 16 || !matches!(c.kind, 1 | 2) || (c.kind == 2 && c.loop_time_ms <= c.time_ms)) {
                 let extension = if has_source_ext { "EXT" } else { "DAT" };
                 return Err(err(format!("USB {extension} for track {id}: Invalid USB cue data")));
             }
@@ -278,67 +320,132 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
             let bpm_changed = bpm > 0 && bpm != previous_bpm;
             let relative = state.read_db(|db| rbl_db::write::analysis_data_path(db.connection(), id)).map_err(write_error)?;
             let target = rbl_anlz::resolve(&location.share_root, &relative);
+            if grid_only && !target.with_extension("DAT").exists() { report.skipped += 1; continue; }
             let mut files = Vec::new();
+            let mut identities = Vec::new();
             // A stick that carries the cues and grid the library already has
             // is not a change: rewriting it would bump the track's analysis,
             // drop its grid undo history and reload the whole library for
             // nothing, and the next sync would copy it all back (#134).
             let mut differs = false;
+            let mut grid_changed = false;
             for extension in ["DAT", "EXT"] {
                 let target = target.with_extension(extension);
                 if !target.exists() { continue; }
-                let mut dest = read_import_anlz(&target, "local library", extension, id)?;
+                let (mut dest, identity) = read_import_anlz_identified(&target, "local library", extension, id)?;
                 let src = if extension == "DAT" { &source_dat } else { &source_cues };
-                differs |= !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
-                if extension == "DAT" && !beats.is_empty() {
-                    differs |= !dest.sections.iter().filter(|s| s.as_beat_grid().is_some()).eq(source_dat.section(b"PQTZ"));
+                if !grid_only {
+                    differs |= !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
+                    dest.sections.retain(|s| !s.is_cue_list());
+                    dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
                 }
-                dest.sections.retain(|s| !s.is_cue_list());
-                dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
+                if extension == "DAT" && !beats.is_empty() {
+                    grid_changed = !dest.sections.iter().filter(|s| s.as_beat_grid().is_some()).eq(source_dat.section(b"PQTZ"));
+                    differs |= grid_changed;
+                }
                 if extension == "DAT" && !beats.is_empty() {
                     dest.sections.retain(|s| s.as_beat_grid().is_none());
                     if let Some(grid) = source_dat.section(b"PQTZ") { dest.sections.push(grid.clone()); }
                 }
-                let bytes = if extension == "EXT" { dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes()) } else { dest.to_bytes() };
+                let bytes = if extension == "EXT" && grid_only {
+                    if !grid_changed { continue; }
+                    let Some(cleared) = dest.with_extended_grid_cleared() else { continue; };
+                    cleared
+                } else if extension == "EXT" { dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes()) } else { dest.to_bytes() };
+                identities.push(identity);
                 files.push((target, bytes));
             }
             if files.is_empty() { report.skipped += 1; continue; }
-            if !differs && !bpm_changed && database_cues_match(state, id, &entries)? { report.unchanged += 1; continue; }
+            let identities = identities.into_iter().collect::<Option<Vec<_>>>();
+            if !grid_only {
+                match &identities {
+                    Some(keys) => full_paths.extend(keys.iter().copied()),
+                    None => unknown_full_identity = true,
+                }
+            }
+            if grid_only {
+                grid_only_tracks += 1;
+                let Some(keys) = &identities else {
+                    unavailable_grid_identity += 1;
+                    report.skipped += 1;
+                    continue;
+                };
+                for (key, (_, bytes)) in keys.iter().zip(&files) {
+                    let hash = blake3::hash(bytes);
+                    if grid_images.insert(*key, hash).is_some_and(|old| old != hash) {
+                        ambiguous_grids.insert(*key);
+                    }
+                }
+            }
+            let identities = identities.unwrap_or_default();
+            if !differs && !bpm_changed && match &entries { Some(entries) => database_cues_match(state, id, entries)?, None => true } {
+                if grid_only { grid_noops.push(identities); }
+                report.unchanged += 1; continue;
+            }
             // Keep only paths across tracks. The private temporary directory
             // holds validated output and cue input until every track passes.
             let slot = prepared.len();
-            let cue_path = staging.path().join(format!("{slot}.cues"));
-            let cue_bytes = source_cues.to_bytes();
-            stage_budget_add(&mut staged_bytes, cue_bytes.len(), stage_limit)?;
+            let payload = if grid_only {
+                ImportPayload::Grid { expected_bpm: previous_bpm, analysis_path: relative }
+            } else {
+                let cue_path = staging.path().join(format!("{slot}.cues"));
+                let cue_bytes = source_cues.to_bytes();
+                stage_budget_add(&mut staged_bytes, cue_bytes.len(), stage_limit)?;
+                std::fs::write(&cue_path, cue_bytes).map_err(err)?;
+                ImportPayload::Cues(cue_path)
+            };
             for (_, bytes) in &files { stage_budget_add(&mut staged_bytes, bytes.len(), stage_limit)?; }
-            std::fs::write(&cue_path, cue_bytes).map_err(err)?;
             let mut staged_files = Vec::new();
             for (index, (target, bytes)) in files.into_iter().enumerate() {
                 let staged = staging.path().join(format!("{slot}.{index}"));
                 std::fs::write(&staged, bytes).map_err(err)?;
                 staged_files.push((target, staged));
             }
-            prepared.push((id.clone(), cue_path, bpm, staged_files));
+            prepared.push((id.clone(), payload, if grid_only && bpm == 0 { previous_bpm } else { bpm }, staged_files, identities));
+        }
+        // A complete cue import keeps its established authority. Never let
+        // a grid-only image built from the old shared DAT undo its cue edit.
+        // Conflicting grid-only images have no unique owner either.
+        let blocked = |key: &rbl_core::durable::FileIdentity| unknown_full_identity || full_paths.contains(key) || ambiguous_grids.contains(key);
+        let before = prepared.len();
+        prepared.retain(|(_, payload, _, _, keys)| !matches!(payload, ImportPayload::Grid { .. }) || !keys.iter().any(&blocked));
+        let rejected_noops = grid_noops.iter().filter(|paths| paths.iter().any(&blocked)).count();
+        let rejected_grids = before - prepared.len() + rejected_noops;
+        report.unchanged -= rejected_noops;
+        report.skipped += rejected_grids;
+        if rejected_grids > 0 {
+            let reason = if unknown_full_identity { "complete cue-import file identity is unavailable" } else { "their local analysis files have conflicting import owners" };
+            report.warnings.push(format!("Skipped {rejected_grids} DAT-only grid import(s) because {reason}. Complete cue imports were retained."));
+        }
+        if unavailable_grid_identity > 0 {
+            report.warnings.push(format!("Skipped {unavailable_grid_identity} DAT-only grid import(s) because local file identity could not be established."));
+        }
+        if grid_only_tracks > 0 {
+            report.warnings.push(format!("USB EXT is missing for {grid_only_tracks} track(s); their DAT beat grids were considered without importing legacy cue data."));
         }
         // All tracks passed preflight before the first write. Reload only a
         // bounded batch of staged output, sharing its database writer (#794).
         let mut pending: Vec<PendingCues> = Vec::new();
         let mut pending_bytes = 0usize;
-        for (id, cue_path, bpm, staged_files) in prepared {
-            let entries = read_import_anlz(&cue_path, "staged USB", "cue data", &id)?
-                .strict_cue_entries().map_err(|e| err(format!("staged USB cue data for track {id}: {e}")))?;
+        for (id, payload, bpm, staged_files, identities) in prepared {
+            let payload = match payload {
+                ImportPayload::Cues(cue_path) => ImportPayload::Cues(read_import_anlz(&cue_path, "staged USB", "cue data", &id)?
+                    .strict_cue_entries().map_err(|e| err(format!("staged USB cue data for track {id}: {e}")))?),
+                ImportPayload::Grid { expected_bpm, analysis_path } => ImportPayload::Grid { expected_bpm, analysis_path },
+            };
             let files = staged_files.into_iter().map(|(target, staged)| {
                 std::fs::read(staged).map(|bytes| (target, bytes)).map_err(err)
             }).collect::<AppResult<Vec<_>>>()?;
             let bytes = files.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
-            // Shared analysis paths must not have two outstanding journals.
-            if pending_bytes.saturating_add(bytes) > CUE_BATCH_BYTES ||
-                pending.iter().any(|p| p.files.iter().any(|(path, _)| files.iter().any(|(other, _)| other == path))) {
+            let item = PendingCues { id, payload, bpm, files, identities };
+            // Keep the captured preflight group after an atomic replacement
+            // changes its inode. Full/full retains its established path rule.
+            if pending_bytes.saturating_add(bytes) > CUE_BATCH_BYTES || pending_overlaps(&pending, &item) {
                 apply_cue_batch(state, editor, &location, std::mem::take(&mut pending), &mut report)?;
                 pending_bytes = 0;
             }
             pending_bytes += bytes;
-            pending.push(PendingCues { id, entries, bpm, files });
+            pending.push(item);
             if pending.len() >= CUE_BATCH_TRACKS || pending_bytes >= CUE_BATCH_BYTES {
                 apply_cue_batch(state, editor, &location, std::mem::take(&mut pending), &mut report)?;
                 pending_bytes = 0;
@@ -399,12 +506,26 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
 const CUE_BATCH_TRACKS: usize = 32;
 const CUE_BATCH_BYTES: usize = 32 << 20;
 
-/// One track's cues and the analysis files that carry them, ready to apply.
+/// A validated cue or grid change and its analysis files, ready to apply.
+enum ImportPayload<C> {
+    Cues(C),
+    Grid { expected_bpm: u32, analysis_path: String },
+}
+
 struct PendingCues {
     id: String,
-    entries: Vec<rbl_anlz::CueEntry>,
+    payload: ImportPayload<Vec<rbl_anlz::CueEntry>>,
     bpm: u32,
     files: Vec<(std::path::PathBuf, Vec<u8>)>,
+    identities: Vec<rbl_core::durable::FileIdentity>,
+}
+
+fn pending_overlaps(pending: &[PendingCues], incoming: &PendingCues) -> bool {
+    pending.iter().any(|previous| {
+        previous.files.iter().any(|(path, _)| incoming.files.iter().any(|(other, _)| other == path)) ||
+        ((matches!(previous.payload, ImportPayload::Grid { .. }) || matches!(incoming.payload, ImportPayload::Grid { .. })) &&
+            previous.identities.iter().any(|key| incoming.identities.contains(key)))
+    })
 }
 
 /// Applies a batch of planned imports: every track's journal and files first,
@@ -425,7 +546,10 @@ fn apply_cue_batch(
     if batch.is_empty() { return Ok(()); }
     let mut journals = Vec::with_capacity(batch.len());
     for item in &batch {
-        let prepared = state.read_db(|db| Ok(crate::file_journal::FileJournal::prepare_cue_import_with(db, state.backup_dir(), location, &item.id, item.bpm, &item.files)))
+        let prepared = state.read_db(|db| Ok(match &item.payload {
+            ImportPayload::Cues(_) => crate::file_journal::FileJournal::prepare_cue_import_with(db, state.backup_dir(), location, &item.id, item.bpm, &item.files),
+            ImportPayload::Grid { analysis_path, .. } => crate::file_journal::FileJournal::prepare_grid_with(db, state.backup_dir(), location, &item.id, item.bpm, analysis_path, &item.files),
+        }))
             .map_err(write_error)
             .and_then(|prepared| prepared);
         match prepared {
@@ -437,7 +561,12 @@ fn apply_cue_batch(
         if let Err(e) = journal.publish() { for journal in &journals { journal.rollback()?; } return Err(e); }
     }
     let written = state.write(|w| {
-        for item in &batch { w.import_usb_cues(&item.id, &item.entries, item.bpm)?; }
+        for item in &batch {
+            match &item.payload {
+                ImportPayload::Cues(entries) => w.import_usb_cues(&item.id, entries, item.bpm)?,
+                ImportPayload::Grid { expected_bpm, analysis_path } => w.save_grid_revision_if_current(&item.id, item.bpm, *expected_bpm, analysis_path)?,
+            }
+        }
         Ok(())
     });
     if let Err(e) = written {
@@ -1569,7 +1698,7 @@ mod tests {
                 entries[0].time_ms = 3000;
                 entries[0].loop_time_ms = 1000;
             }
-            batch.push(PendingCues { id, entries, bpm: 12800,
+            batch.push(PendingCues { id, identities: Vec::new(), payload: ImportPayload::Cues(entries), bpm: 12800,
                 files: vec![(target.clone(), std::fs::read(source.with_extension("DAT")).unwrap())] });
         }
         assert!(apply_cue_batch(&state, &editor, &location, batch, &mut ImportReport::default()).is_err());
@@ -1730,7 +1859,7 @@ mod tests {
                     let path = source.with_extension(extension);
                     source_images.push((path.clone(), std::fs::read(path).unwrap()));
                 }
-                batch.push(PendingCues { id, entries,
+                batch.push(PendingCues { id, identities: Vec::new(), payload: ImportPayload::Cues(entries),
                     bpm: u32::from(dat.beat_grid().unwrap()[0].tempo_x100),
                     files: vec![(target.clone(), dat.to_bytes())] });
             }
@@ -1809,6 +1938,508 @@ mod tests {
         assert_eq!(snapshot(), changed_row);
         assert!(editor.has_history(&id));
         assert_eq!(std::fs::read(source).unwrap(), changed_source);
+    }
+
+    // A valid legacy DAT is independent grid authority, not authority to
+    // delete or reconstruct richer local cues omitted from that projection.
+    fn legacy_dat_grid_only_case(raw_tempo: u16) {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, tracks) = library_and_stick(dir.path());
+        let id = rbl_db::fixture::track_id(0);
+        let relative = state.write(|w| w.analysis_data_path_for(&id)).unwrap();
+        state.write(|w| w.register_analysis(&id, &rbl_db::write::AnalysisRegistration {
+            bpm_x100: 12800, key: None, analysis_data_path: &relative,
+        })).unwrap();
+        let target = rbl_anlz::resolve(&location.share_root, &relative);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let mut dat = rbl_anlz::AnlzBuilder::new();
+        dat.path("/local-fixture.mp3").waveform_preview(b"PWAV", &[1, 2, 3])
+            .beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 0 }]).cue_lists(false);
+        std::fs::write(&target, dat.finish()).unwrap();
+        let mut ext = rbl_anlz::AnlzBuilder::new();
+        ext.path("/local-fixture.mp3").waveform_preview(b"PWV3", &[4, 5, 6]).cue_lists(true);
+        std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+        let source = usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT");
+        write_stick(source.parent().unwrap(), &[
+            stick_cue(0, 1000, None, 0, "memory label"),
+            stick_cue(1, 2000, None, 22, "A label"),
+            stick_cue(6, 5000, Some(9000), 46, "E loop label"),
+        ]);
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let full = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!((full.tracks, full.skipped), (1, tracks - 1));
+        let cue_rows = || state.write(|w| w.cue_rows(&id)).unwrap();
+        let cues_before = cue_rows();
+        let dat_before = rbl_anlz::Anlz::read(&target).unwrap();
+        let ext_before = std::fs::read(target.with_extension("EXT")).unwrap();
+        let snapshot = || state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT BPM, COALESCE(rb_local_usn,0), CAST(COALESCE(AnalysisUpdated,'') AS TEXT) FROM djmdContent WHERE ID=?1",
+            [&id], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)))?)).unwrap();
+        let row_before = snapshot();
+        std::fs::remove_file(source.with_extension("EXT")).unwrap();
+        let mut legacy = rbl_anlz::Anlz::read(&source).unwrap();
+        let grid = legacy.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap();
+        grid.payload[2..4].copy_from_slice(&raw_tempo.to_be_bytes());
+        grid.payload[4..8].copy_from_slice(&500_u32.to_be_bytes());
+        grid.header[6..8].copy_from_slice(&(-37_i16).to_be_bytes());
+        let legacy_bytes = legacy.to_bytes();
+        std::fs::write(&source, &legacy_bytes).unwrap();
+        assert!(legacy.section(b"PCO2").is_none());
+        assert_eq!(legacy.legacy_cue_entries().len(), 2);
+        let usb_database = usb.join("PIONEER/rekordbox/exportLibrary.db");
+        let database_before = std::fs::read(&usb_database).unwrap();
+        editor.seed_history(&id);
+        let imported = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!(cue_rows(), cues_before, "every local cue ID/value must survive grid-only import");
+        assert_eq!((imported.tracks, imported.skipped), (1, tracks - 1),
+            "valid legacy DAT grid must not be skipped merely because EXT is absent");
+        let after = rbl_anlz::Anlz::read(&target).unwrap();
+        assert_eq!(after.section(b"PQTZ"), legacy.section(b"PQTZ"), "copy the exact grid including its signed offset");
+        assert_eq!(after.sections.iter().filter(|s| s.is_cue_list()).collect::<Vec<_>>(),
+            dat_before.sections.iter().filter(|s| s.is_cue_list()).collect::<Vec<_>>());
+        assert_eq!(std::fs::read(target.with_extension("EXT")).unwrap(), ext_before);
+        assert_eq!(snapshot().0, if raw_tempo == 0 { row_before.0 } else { u32::from(raw_tempo) });
+        assert!(!editor.has_history(&id), "a changed grid retires its old Undo");
+        assert!(!imported.warnings.is_empty(), "partial cue availability must be explicit");
+        let changed_row = snapshot();
+        let changed_dat = std::fs::read(&target).unwrap();
+        editor.seed_history(&id);
+        let repeated = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!((repeated.tracks, repeated.unchanged), (0, 1));
+        assert!(editor.has_history(&id), "an identical import preserves Undo");
+        assert_eq!(snapshot(), changed_row);
+        assert_eq!(cue_rows(), cues_before);
+        assert_eq!(std::fs::read(&target).unwrap(), changed_dat);
+        assert_eq!(std::fs::read(target.with_extension("EXT")).unwrap(), ext_before);
+        assert_eq!(std::fs::read(&source).unwrap(), legacy_bytes);
+        assert_eq!(std::fs::read(&usb_database).unwrap(), database_before);
+        assert!(!source.with_extension("EXT").exists(), "import never creates files on USB");
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_preserves_all_cue_identity_and_offset() {
+        legacy_dat_grid_only_case(13000);
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_preserves_zero_tempo_and_noop() {
+        legacy_dat_grid_only_case(0);
+    }
+
+    fn legacy_grid_control_fixture(dir: &Path) -> (AppState, rbl_db::LibraryLocation, PathBuf, PathBuf, PathBuf) {
+        let (state, location, usb, _) = library_and_stick(dir);
+        let local = local_analysis_for(&state, &location, 1).remove(0);
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().tracks, 1);
+        let source = usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT");
+        std::fs::remove_file(source.with_extension("EXT")).unwrap();
+        let mut dat = rbl_anlz::Anlz::read(&source).unwrap();
+        dat.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap().payload[4..8].copy_from_slice(&500_u32.to_be_bytes());
+        std::fs::write(&source, dat.to_bytes()).unwrap();
+        (state, location, usb, local, source)
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_rejects_malformed_before_any_track_writes() {
+        for malformed in ["short_header", "short_payload", "trailing_payload", "duplicate", "overflow"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, location, usb, _) = library_and_stick(dir.path());
+            let local = local_analysis_for(&state, &location, 2);
+            let before: Vec<_> = local.iter().map(|path| std::fs::read(path).unwrap()).collect();
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            for index in 0..2 {
+                editor.seed_history(&rbl_db::fixture::track_id(index));
+                let source = usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000.DAT", index + 1));
+                std::fs::remove_file(source.with_extension("EXT")).unwrap();
+                if index == 0 { continue; }
+                let mut dat = rbl_anlz::Anlz::read(&source).unwrap();
+                let grid = dat.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap();
+                match malformed {
+                    "short_header" => grid.header.truncate(8),
+                    "short_payload" => { grid.payload.pop(); },
+                    "trailing_payload" => grid.payload.push(0),
+                    "overflow" => grid.header[8..12].copy_from_slice(&u32::MAX.to_be_bytes()),
+                    "duplicate" => { let duplicate = grid.clone(); dat.sections.push(duplicate); },
+                    _ => unreachable!(),
+                }
+                std::fs::write(source, dat.to_bytes()).unwrap();
+            }
+            let cues: Vec<_> = (0..2).map(|index| state.write(|w| w.cue_rows(&rbl_db::fixture::track_id(index))).unwrap()).collect();
+            assert!(import(&state, &editor, &usb, true, false, false, false).is_err(), "{malformed}");
+            for (index, (path, bytes)) in local.iter().zip(&before).enumerate() {
+                assert_eq!(&std::fs::read(path).unwrap(), bytes, "{malformed}");
+                assert_eq!(state.write(|w| w.cue_rows(&rbl_db::fixture::track_id(index))).unwrap(), cues[index]);
+                assert!(editor.has_history(&rbl_db::fixture::track_id(index)));
+            }
+            assert!(!state.backup_dir().join("analysis-journal").exists_with_entries());
+        }
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_does_not_fallback_for_present_companions() {
+        for companion in ["empty", "corrupt", "directory", "mixed_case", "ambiguous"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, _location, usb, local, source) = legacy_grid_control_fixture(dir.path());
+            let before = std::fs::read(&local).unwrap();
+            let id = rbl_db::fixture::track_id(0);
+            let cues = state.write(|w| w.cue_rows(&id)).unwrap();
+            let mut empty = rbl_anlz::AnlzBuilder::new(); empty.path("/usb.mp3");
+            let empty = empty.finish();
+            match companion {
+                "empty" => std::fs::write(source.with_extension("EXT"), &empty).unwrap(),
+                "corrupt" => std::fs::write(source.with_extension("EXT"), b"invalid").unwrap(),
+                "directory" => std::fs::create_dir(source.with_extension("EXT")).unwrap(),
+                "mixed_case" => std::fs::write(source.with_extension("eXt"), &empty).unwrap(),
+                "ambiguous" => {
+                    std::fs::write(source.with_extension("ext"), &empty).unwrap();
+                    std::fs::write(source.with_extension("eXt"), &empty).unwrap();
+                },
+                _ => unreachable!(),
+            }
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            let result = import(&state, &editor, &usb, true, false, false, false);
+            assert!(result.is_err() || result.unwrap().tracks == 0, "{companion}");
+            assert_eq!(std::fs::read(&local).unwrap(), before, "{companion}");
+            assert_eq!(state.write(|w| w.cue_rows(&id)).unwrap(), cues);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_dat_grid_only_refuses_named_dat_alias_and_dangling_ext() {
+        for alias in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, _location, usb, local, source) = legacy_grid_control_fixture(dir.path());
+            let before = std::fs::read(&local).unwrap();
+            if alias {
+                let actual = source.with_file_name("actual.DAT");
+                std::fs::rename(&source, &actual).unwrap();
+                std::os::unix::fs::symlink(&actual, &source).unwrap();
+                // The named source has a present companion, but the actual
+                // target's sibling is absent. Never infer absence from it.
+                let mut ext = rbl_anlz::AnlzBuilder::new(); ext.path("/usb.mp3");
+                std::fs::write(source.with_extension("EXT"), ext.finish()).unwrap();
+            } else {
+                std::os::unix::fs::symlink(source.with_file_name("missing.EXT"), source.with_extension("EXT")).unwrap();
+            }
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            let result = import(&state, &editor, &usb, true, false, false, false);
+            assert!(result.is_err() || result.unwrap().tracks == 0);
+            assert_eq!(std::fs::read(&local).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_honors_lock_and_exact_stage_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, _location, usb, local, _source) = legacy_grid_control_fixture(dir.path());
+        let id = rbl_db::fixture::track_id(0);
+        let before = std::fs::read(&local).unwrap();
+        let cues = state.write(|w| w.cue_rows(&id)).unwrap();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        state.write(|w| w.set_analysis_lock(&id, true)).unwrap();
+        assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().tracks, 0);
+        assert_eq!(std::fs::read(&local).unwrap(), before);
+        state.write(|w| w.set_analysis_lock(&id, false)).unwrap();
+        assert!(import_with_stage_budget(&state, &editor, &usb, true, false, false, false, 0).is_err());
+        assert_eq!(std::fs::read(&local).unwrap(), before);
+        assert_eq!(state.write(|w| w.cue_rows(&id)).unwrap(), cues);
+        // No cue input or unchanged EXT is charged or staged for grid-only.
+        let report = import_with_stage_budget(&state, &editor, &usb, true, false, false, false, before.len() as u64).unwrap();
+        assert_eq!(report.tracks, 1);
+        assert_eq!(state.write(|w| w.cue_rows(&id)).unwrap(), cues);
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_cue_changes_are_not_import_authority() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, _location, usb, local, source) = legacy_grid_control_fixture(dir.path());
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().tracks, 1);
+        let before = std::fs::read(&local).unwrap();
+        let id = rbl_db::fixture::track_id(0);
+        let cues = state.write(|w| w.cue_rows(&id)).unwrap();
+        let grid = rbl_anlz::Anlz::read(&source).unwrap().section(b"PQTZ").unwrap().clone();
+        write_stick(source.parent().unwrap(), &[stick_cue(1, 9000, None, 0, "ignored legacy cue")]);
+        std::fs::remove_file(source.with_extension("EXT")).unwrap();
+        let mut changed = rbl_anlz::Anlz::read(&source).unwrap();
+        changed.sections.retain(|section| section.tag.0 != *b"PQTZ"); changed.sections.push(grid);
+        std::fs::write(source, changed.to_bytes()).unwrap();
+        editor.seed_history(&id);
+        let report = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!((report.tracks, report.unchanged), (0, 1));
+        assert_eq!(std::fs::read(&local).unwrap(), before);
+        assert_eq!(state.write(|w| w.cue_rows(&id)).unwrap(), cues);
+        assert!(editor.has_history(&id));
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_yields_shared_analysis_to_complete_cue_import() {
+        for grid_index in 0..2 {
+            for grid_changed in [false, true] {
+              for full_changed in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let (state, location, usb, _) = library_and_stick(dir.path());
+                let local = local_analysis_for(&state, &location, 2);
+                let editor = crate::grid::GridEditor::at(state.backup_dir());
+                assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().tracks, 2);
+                let relative = state.write(|w| w.analysis_data_path_for(&rbl_db::fixture::track_id(0))).unwrap();
+                state.write(|w| w.register_analysis(&rbl_db::fixture::track_id(1), &rbl_db::write::AnalysisRegistration {
+                    bpm_x100: 12800, key: None, analysis_data_path: &relative,
+                })).unwrap();
+                let full_index = 1 - grid_index;
+                let full_source = usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000.DAT", full_index + 1));
+                if full_changed { write_stick(full_source.parent().unwrap(), &[stick_cue(1, 9000, None, 22, "full import wins")]); }
+                let mut full = rbl_anlz::Anlz::read(&full_source).unwrap();
+                if full_changed {
+                    full.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap().payload[4..8].copy_from_slice(&700_u32.to_be_bytes());
+                    std::fs::write(&full_source, full.to_bytes()).unwrap();
+                }
+                let grid_source = usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000.DAT", grid_index + 1));
+                std::fs::remove_file(grid_source.with_extension("EXT")).unwrap();
+                if grid_changed {
+                    let mut grid = rbl_anlz::Anlz::read(&grid_source).unwrap();
+                    grid.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap().payload[4..8].copy_from_slice(&500_u32.to_be_bytes());
+                    std::fs::write(grid_source, grid.to_bytes()).unwrap();
+                }
+                let grid_id = rbl_db::fixture::track_id(grid_index);
+                let cues = state.write(|w| w.cue_rows(&grid_id)).unwrap();
+                let report = import(&state, &editor, &usb, true, false, false, false).unwrap();
+                assert_eq!((report.tracks, report.unchanged), if full_changed { (1, 0) } else { (0, 1) });
+                let shared = rbl_anlz::Anlz::read(&local[0]).unwrap();
+                assert_eq!(shared.section(b"PQTZ"), full.section(b"PQTZ"));
+                assert_eq!(shared.legacy_cue_entries(), full.legacy_cue_entries());
+                assert_eq!(state.write(|w| w.cue_rows(&grid_id)).unwrap(), cues);
+                assert!(report.warnings.iter().any(|warning| warning.contains("conflicting import owners")));
+              }
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_shared_grids_require_identical_images() {
+        for identical in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let (state, location, usb, _) = library_and_stick(dir.path());
+            let local = local_analysis_for(&state, &location, 2);
+            let editor = crate::grid::GridEditor::at(state.backup_dir());
+            assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().tracks, 2);
+            let relative = state.write(|w| w.analysis_data_path_for(&rbl_db::fixture::track_id(0))).unwrap();
+            state.write(|w| w.register_analysis(&rbl_db::fixture::track_id(1), &rbl_db::write::AnalysisRegistration {
+                bpm_x100: 12800, key: None, analysis_data_path: &relative,
+            })).unwrap();
+            let before = std::fs::read(&local[0]).unwrap();
+            let cues: Vec<_> = (0..2).map(|index| state.write(|w| w.cue_rows(&rbl_db::fixture::track_id(index))).unwrap()).collect();
+            for index in 0..2 {
+                let id = rbl_db::fixture::track_id(index);
+                state.write(|w| w.save_grid_revision(&id, 12800)).unwrap();
+                let source = usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000.DAT", index + 1));
+                std::fs::remove_file(source.with_extension("EXT")).unwrap();
+                let mut dat = rbl_anlz::Anlz::read(&source).unwrap();
+                let grid = dat.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap();
+                grid.payload[2..4].copy_from_slice(&13000_u16.to_be_bytes());
+                grid.payload[4..8].copy_from_slice(&(if identical || index == 0 {500_u32} else {700_u32}).to_be_bytes());
+                std::fs::write(source, dat.to_bytes()).unwrap();
+            }
+            let revisions = || (0..2).map(|index| state.read_db(|db| Ok(db.connection().query_row(
+                "SELECT CAST(AnalysisUpdated AS TEXT) FROM djmdContent WHERE ID=?1", [rbl_db::fixture::track_id(index)], |row| row.get::<_,String>(0))?)).unwrap()).collect::<Vec<_>>();
+            let before_revisions = revisions();
+            let report = import(&state, &editor, &usb, true, false, false, false).unwrap();
+            assert_eq!(report.tracks, if identical {2} else {0});
+            for (before, after) in before_revisions.iter().zip(revisions()) {
+                if identical { assert_eq!(after.encode_utf16().next(), before.encode_utf16().next().map(|unit| unit.wrapping_add(1))); }
+                else { assert_eq!(*before, after); }
+            }
+            for (index, cue) in cues.iter().enumerate() {
+                let id = rbl_db::fixture::track_id(index);
+                assert_eq!(state.write(|w| w.cue_rows(&id)).unwrap(), *cue);
+                let bpm = state.read_db(|db| Ok(db.connection().query_row("SELECT BPM FROM djmdContent WHERE ID=?1", [&id], |row| row.get::<_,u32>(0))?)).unwrap();
+                assert_eq!(bpm, if identical {13000} else {12800});
+            }
+            if !identical { assert_eq!(std::fs::read(&local[0]).unwrap(), before); }
+            assert!(!state.backup_dir().join("analysis-journal").exists_with_entries());
+        }
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_journal_preserves_committed_prefix_and_nonnumeric_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, _, _) = library_and_stick(dir.path());
+        let local = local_analysis_for(&state, &location, 2);
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let _gate = state.edit_gate.lock();
+        let _files = state.analysis_write.lock();
+        let id = rbl_db::fixture::track_id(0);
+        // The actual grid writer advances the UTF-16 revision, not a decimal.
+        for _ in 0..12 { state.write(|w| w.save_grid_revision(&id, 12000)).unwrap(); }
+        let revision = || state.read_db(|db| Ok(db.connection().query_row("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1", [&id], |row| row.get::<_,String>(0))?)).unwrap();
+        let previous_revision = revision();
+        assert!(previous_revision.parse::<u64>().is_err());
+        let relative = state.write(|w| w.analysis_data_path_for(&id)).unwrap();
+        let old = std::fs::read(&local[0]).unwrap();
+        let mut image = rbl_anlz::Anlz::read(&local[0]).unwrap();
+        image.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap().payload[4..8].copy_from_slice(&500_u32.to_be_bytes());
+        image.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap().payload[2..4].copy_from_slice(&0_u16.to_be_bytes());
+        let image = image.to_bytes();
+        editor.seed_history(&id);
+        let first = PendingCues { id: id.clone(), identities: Vec::new(), payload: ImportPayload::Grid { expected_bpm: 12000, analysis_path: relative.clone() }, bpm: 12000, files: vec![(local[0].clone(), image.clone())] };
+        let bad = rbl_anlz::CueEntry { hot_cue: 1, active_loop: false, kind: 2, time_ms: 3000, loop_time_ms: 1000, color_id: 0, comment: None, color_code: None, rgb: None };
+        let second_id = rbl_db::fixture::track_id(1);
+        state.write(|w| w.register_analysis(&second_id, &rbl_db::write::AnalysisRegistration {
+            bpm_x100: 12000, key: None, analysis_data_path: &relative,
+        })).unwrap();
+        editor.seed_history(&second_id);
+        let second_before = std::fs::read(&local[1]).unwrap();
+        let second = PendingCues { id: second_id.clone(), identities: Vec::new(), payload: ImportPayload::Cues(vec![bad]), bpm: 12800, files: vec![(local[1].clone(), image.clone())] };
+        let mut report = ImportReport::default();
+        assert!(apply_cue_batch(&state, &editor, &location, vec![first, second], &mut report).is_err());
+        assert_ne!(old, image);
+        assert_eq!(std::fs::read(&local[0]).unwrap(), image);
+        assert_ne!(revision(), previous_revision);
+        assert_eq!(rbl_anlz::Anlz::read(&local[0]).unwrap().beat_grid().unwrap()[0].tempo_x100, 0);
+        assert_eq!(state.read_db(|db| Ok(db.connection().query_row("SELECT BPM FROM djmdContent WHERE ID=?1", [&id], |row| row.get::<_,u32>(0))?)).unwrap(), 12000);
+        assert_eq!(std::fs::read(&local[1]).unwrap(), second_before);
+        assert!(!editor.has_history(&id));
+        assert!(editor.has_history(&second_id));
+        // The next same-file journal starts AFTER the committed first image,
+        // as the caller's shared-path batch flush does. A rejected row CAS
+        // restores that image, never the earlier generation.
+        let conflict = PendingCues { id: second_id, identities: Vec::new(), payload: ImportPayload::Grid { expected_bpm: 9999, analysis_path: relative }, bpm: 12000, files: vec![(local[0].clone(), image.clone())] };
+        assert!(apply_cue_batch(&state, &editor, &location, vec![conflict], &mut report).is_err());
+        assert_eq!(std::fs::read(&local[0]).unwrap(), image);
+        assert!(!state.backup_dir().join("analysis-journal").exists_with_entries());
+    }
+
+    #[test]
+    fn legacy_dat_grid_only_clears_stale_pqt2_but_keeps_noop_extended_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, _location, usb, local, _source) = legacy_grid_control_fixture(dir.path());
+        let mut builder = rbl_anlz::AnlzBuilder::new();
+        builder.path("/original.mp3").extended_grid_empty();
+        for section in rbl_anlz::cues::sections(&[stick_cue(1, 2000, None, 22, "")], true) { builder.copy_section(&section); }
+        let mut ext = rbl_anlz::parse(&builder.finish()).unwrap();
+        let grid = ext.sections.iter_mut().find(|section| section.tag.0 == *b"PQT2").unwrap();
+        grid.header[12..16].copy_from_slice(&((1_u32 << 16) | 0x3200).to_be_bytes());
+        grid.header[16..20].copy_from_slice(&250_u32.to_be_bytes());
+        grid.header[20..24].copy_from_slice(&((1_u32 << 16) | 0x3200).to_be_bytes());
+        grid.header[24..28].copy_from_slice(&250_u32.to_be_bytes());
+        grid.header[28..32].copy_from_slice(&1_u32.to_be_bytes());
+        grid.header[32..36].copy_from_slice(&13051_u32.to_be_bytes());
+        grid.payload = vec![0x12, 0x34];
+        let before = ext.to_bytes();
+        let path = local.with_extension("EXT");
+        std::fs::write(&path, &before).unwrap();
+        let id = rbl_db::fixture::track_id(0);
+        let cues = state.write(|w| w.cue_rows(&id)).unwrap();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().tracks, 1);
+        let cleared = rbl_anlz::Anlz::read(&path).unwrap();
+        assert_eq!(cleared.section(b"PQT2").unwrap().payload, [] as [u8; 0]);
+        assert_eq!(cleared.sections.iter().filter(|section| section.is_cue_list()).collect::<Vec<_>>(),
+            ext.sections.iter().filter(|section| section.is_cue_list()).collect::<Vec<_>>());
+        assert_eq!(state.write(|w| w.cue_rows(&id)).unwrap(), cues);
+        // An identical DAT never empties a subsequently present local PQT2.
+        std::fs::write(&path, &before).unwrap();
+        editor.seed_history(&id);
+        let repeat = import(&state, &editor, &usb, true, false, false, false).unwrap();
+        assert_eq!((repeat.tracks, repeat.unchanged), (0, 1));
+        assert_eq!(std::fs::read(path).unwrap(), before);
+        assert!(editor.has_history(&id));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_dat_grid_only_shared_filesystem_alias_preserves_complete_cues() {
+        use std::os::unix::fs::MetadataExt;
+        for directory in [true, false] {
+            for grid_index in [1, 0] {
+              for full_changed in [true, false] {
+                let dir = tempfile::tempdir().unwrap();
+                let (state, location, usb, _) = library_and_stick(dir.path());
+                let local = local_analysis_for(&state, &location, 2);
+                let editor = crate::grid::GridEditor::at(state.backup_dir());
+                assert_eq!(import(&state, &editor, &usb, true, false, false, false).unwrap().tracks, 2);
+                let real_relative = state.write(|w| w.analysis_data_path_for(&rbl_db::fixture::track_id(0))).unwrap();
+                let alias = if directory {
+                    let parent = location.share_root.join("grid-alias");
+                    std::os::unix::fs::symlink(local[0].parent().unwrap(), &parent).unwrap();
+                    parent.join(local[0].file_name().unwrap())
+                } else {
+                    let alias = location.share_root.join("grid-alias.DAT");
+                    std::fs::hard_link(&local[0], &alias).unwrap();
+                    alias
+                };
+                assert!(alias.canonicalize().unwrap().starts_with(location.share_root.canonicalize().unwrap()));
+                let real_meta = std::fs::metadata(&local[0]).unwrap();
+                let alias_meta = std::fs::metadata(&alias).unwrap();
+                assert_eq!((real_meta.dev(), real_meta.ino()), (alias_meta.dev(), alias_meta.ino()));
+                let alias_relative = format!("/{}", alias.strip_prefix(&location.share_root).unwrap().to_str().unwrap());
+                let full_index = 1 - grid_index;
+                for (index, relative) in [(full_index, &real_relative), (grid_index, &alias_relative)] {
+                    state.write(|w| w.register_analysis(&rbl_db::fixture::track_id(index), &rbl_db::write::AnalysisRegistration {
+                        bpm_x100: 12800, key: None, analysis_data_path: relative,
+                    })).unwrap();
+                }
+                let full_source = usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000.DAT", full_index + 1));
+                if full_changed { write_stick(full_source.parent().unwrap(), &[stick_cue(1, 9000, None, 22, "complete cue owner")]); }
+                let full = rbl_anlz::Anlz::read(&full_source).unwrap();
+                let grid_source = usb.join(format!("PIONEER/USBANLZ/P000/{:08X}/ANLZ0000.DAT", grid_index + 1));
+                std::fs::remove_file(grid_source.with_extension("EXT")).unwrap();
+                let mut grid = rbl_anlz::Anlz::read(&grid_source).unwrap();
+                grid.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap().payload[4..8].copy_from_slice(&500_u32.to_be_bytes());
+                std::fs::write(grid_source, grid.to_bytes()).unwrap();
+                let report = import(&state, &editor, &usb, true, false, false, false).unwrap();
+                let actual = rbl_anlz::Anlz::read(&local[0]).unwrap();
+                assert_eq!(actual.legacy_cue_entries(), full.legacy_cue_entries(), "complete cues must win through filesystem aliases");
+                assert_eq!(actual.section(b"PQTZ"), full.section(b"PQTZ"));
+                assert_eq!((report.tracks, report.unchanged), if full_changed { (1, 0) } else { (0, 1) });
+              }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_dat_grid_only_alias_journals_flush_with_captured_preflight_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, _, _) = library_and_stick(dir.path());
+        let local = local_analysis_for(&state, &location, 2);
+        let first_id = rbl_db::fixture::track_id(0);
+        let second_id = rbl_db::fixture::track_id(1);
+        let relative = state.write(|w| w.analysis_data_path_for(&first_id)).unwrap();
+        let alias_parent = location.share_root.join("journal-alias");
+        std::os::unix::fs::symlink(local[0].parent().unwrap(), &alias_parent).unwrap();
+        let alias = alias_parent.join(local[0].file_name().unwrap());
+        let alias_relative = format!("/{}", alias.strip_prefix(&location.share_root).unwrap().to_str().unwrap());
+        state.write(|w| w.register_analysis(&second_id, &rbl_db::write::AnalysisRegistration {
+            bpm_x100: 12000, key: None, analysis_data_path: &alias_relative,
+        })).unwrap();
+        let key = |path: &Path| rbl_core::durable::file_identity(&std::fs::File::open(path).unwrap()).unwrap();
+        let first_key = key(&local[0]);
+        let second_key = key(&alias);
+        assert_eq!(first_key, second_key);
+        let mut image = rbl_anlz::Anlz::read(&local[0]).unwrap();
+        image.sections.iter_mut().find(|section| section.tag.0 == *b"PQTZ").unwrap().payload[4..8].copy_from_slice(&500_u32.to_be_bytes());
+        let image = image.to_bytes();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        editor.seed_history(&first_id); editor.seed_history(&second_id);
+        let _gate = state.edit_gate.lock();
+        let _files = state.analysis_write.lock();
+        let first = PendingCues { id: first_id.clone(), identities: vec![first_key], payload: ImportPayload::Grid { expected_bpm: 12000, analysis_path: relative }, bpm: 12000, files: vec![(local[0].clone(), image.clone())] };
+        let second = PendingCues { id: second_id.clone(), identities: vec![second_key], payload: ImportPayload::Grid { expected_bpm: 9999, analysis_path: alias_relative }, bpm: 12000, files: vec![(alias.clone(), image.clone())] };
+        let mut pending = vec![first];
+        assert!(pending_overlaps(&pending, &second), "actual alias identity must trigger the caller's batch flush");
+        let mut report = ImportReport::default();
+        apply_cue_batch(&state, &editor, &location, std::mem::take(&mut pending), &mut report).unwrap();
+        assert_ne!(key(&alias), first_key, "atomic replacement changes the inode; do not recapture it for grouping");
+        pending.push(second);
+        assert!(apply_cue_batch(&state, &editor, &location, pending, &mut report).is_err());
+        assert_eq!(std::fs::read(&local[0]).unwrap(), image);
+        assert_eq!(std::fs::read(&alias).unwrap(), image);
+        assert_eq!(report.changed, vec![first_id.clone()]);
+        assert!(!editor.has_history(&first_id));
+        assert!(editor.has_history(&second_id));
+        assert!(!state.backup_dir().join("analysis-journal").exists_with_entries());
     }
 
 }

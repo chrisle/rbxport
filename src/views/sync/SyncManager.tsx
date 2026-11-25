@@ -815,9 +815,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   }, [canSync, nodes, ticked, tickedDevices, estimates, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll, refreshDevices, readDevice, onSynced, t]);
 
   /** One line for a cue import: what changed, and what already matched. */
-  const cuesResult = (device: string, result: { tracks: number; skipped: number; unchanged?: number }) => {
+  const cuesResult = (device: string, result: { tracks: number; skipped: number; unchanged?: number; warnings?: string[] }) => {
     const unchanged = result.unchanged ?? 0;
-    if (result.tracks === 0 && unchanged > 0 && result.skipped === 0) {
+    if (result.tracks === 0 && unchanged > 0 && result.skipped === 0 && !result.warnings?.length) {
       return t("{device}: cues and beat grids already match your library; nothing was changed.", { device });
     }
     const parts = [result.tracks === 1

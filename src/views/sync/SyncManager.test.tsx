@@ -1819,3 +1819,15 @@ describe("mounted-volume estimate identity", () => {
     expect(host.textContent).toContain("2.0 GB to add");
   });
 });
+
+it("does not claim unavailable cue data matches after a grid-only no-op", async () => {
+  await renderWith({ importButtonCues: true, importButtonHistory: false, importButtonSettings: false });
+  const warning = "USB EXT is missing for 1 track(s); their DAT beat grids were considered without importing legacy cue data.";
+  importUsb.mockResolvedValueOnce({ tracks: 0, histories: 0, settings: 0, ratings: 0, skipped: 0, unchanged: 1, warnings: [warning] });
+  click(box("USB A"));
+  await settle();
+  click(importButton());
+  await settle();
+  expect(status()).toContain(warning);
+  expect(status()).not.toContain("cues and beat grids already match");
+});

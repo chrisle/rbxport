@@ -1220,7 +1220,7 @@ fn device_cues(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum BrowserExt {
+pub(crate) enum BrowserExt {
     Missing,
     Present(PathBuf),
     Refused,
@@ -1229,7 +1229,7 @@ enum BrowserExt {
 /// The DAT already has a validated, plain parent. Resolve only its sibling:
 /// an exact-path fast path, or one strict leaf listing for case variants.
 /// Refused and ambiguous entries must not be mistaken for genuine absence.
-fn browser_ext_sibling(dat: &Path) -> BrowserExt {
+pub(crate) fn browser_ext_sibling(dat: &Path) -> BrowserExt {
     use unicode_normalization::UnicodeNormalization;
     let ext = dat.with_extension("EXT");
     match std::fs::symlink_metadata(&ext) {

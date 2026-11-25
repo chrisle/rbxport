@@ -70,7 +70,12 @@ impl FileJournal {
     pub fn prepare_grid(root: &Path, location: &rbl_db::LibraryLocation, track: &str,
         bpm_after: u32, analysis_path: &str, files: &[(PathBuf, Vec<u8>)]) -> AppResult<Self> {
         let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(error)?;
-        Self::prepare_bound(&db, root, location, track, BpmAfter::Exact(bpm_after), None, true, files, Some(analysis_path))
+        Self::prepare_grid_with(&db, root, location, track, bpm_after, analysis_path, files)
+    }
+
+    pub fn prepare_grid_with(db: &rbl_db::Library, root: &Path, location: &rbl_db::LibraryLocation, track: &str,
+        bpm_after: u32, analysis_path: &str, files: &[(PathBuf, Vec<u8>)]) -> AppResult<Self> {
+        Self::prepare_bound(db, root, location, track, BpmAfter::Exact(bpm_after), None, true, files, Some(analysis_path))
     }
 
     #[allow(clippy::too_many_arguments, reason = "journal inputs plus an optional planned grid association")]
