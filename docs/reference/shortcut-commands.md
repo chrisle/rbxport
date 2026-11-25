@@ -128,6 +128,7 @@ An explicit Load also reloads a track already on that deck, using the ordinary l
 | Adjust BPM/BeatGrid | command + G | 303e | no | GRID pad mode |
 | Shift Beatgrid left/right | command + cursor left/right | 3044, 3043 | no | grid shift buttons |
 | Shift Beatgrid to the center | option + command + \ | 3045 | no | none |
+| Mark the downbeat here (`markDownbeat`, Make playhead beat 1) | unbound (RBXport's own) | none established | no | existing GRID downbeat button |
 | Low, Mid, High Kill (`eqKill*`) | unbound (RBXport's own) | none | no | mixer kill buttons (MixerStrip, `a`/`b`) |
 
 Every deck command is registered by `Player` for its deck, and its key
@@ -136,6 +137,12 @@ deck's track does not apply while the deck is empty (`playback.idle`), as
 before. Quantize is a deck setting, so Q and its button both apply before a
 track loads. Jump, Load on Player 1 and 2, the panel tabs and the metronome
 sound apply to an empty deck too.
+
+The assignable downbeat action is app-owned and starts without a key in every
+preset. Player A and B have separate rows. It calls the existing button action
+once per press; an empty/hidden deck, locked or protected grid, or active partial
+grid scope cannot edit. This adds no native command ID/default and does not
+change the button's grid transformation or reuse TAP/Shift Beatgrid to center.
 
 ### Keys that are not in the key map
 

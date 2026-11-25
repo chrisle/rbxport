@@ -149,6 +149,8 @@ export type Action =
   | "shiftGridLeft"
   | "shiftGridRight"
   | "shiftGridToCenter"
+  // App-owned shortcut for the existing GRID button; no stock ID/default established.
+  | "markDownbeat"
   // The mixer's kill buttons, one per band and deck. rekordbox's Export preset
   // binds nothing to them [OBS: no EQ command in keymap.ts], so these rows are
   // this app's own and start unbound; the Keyboard pane assigns them.
@@ -651,6 +653,13 @@ export const BINDINGS: readonly Binding[] = [
   ...PLAYER_A.filter((row) =>
     row.action !== "metronomeSound" && row.action !== "adjustGrid" && hotCuePad(row.action ?? "cue")?.clear !== true)
     .map(playerB),
+  // The existing GRID button, requested as an assignable action (#858).
+  // App-owned: no native command ID or preset key is asserted.
+  ...(["a", "b"] as const).map((deck): Binding => ({
+    id: `${deck}.markDownbeat`, group: deck === "a" ? "Player A" : "Player B",
+    pane: deck === "a" ? "Player A" : "Player B", deck,
+    label: "Mark the downbeat here", chord: { key: "" }, action: "markDownbeat",
+  })),
   // The mixer's kill buttons: this app's own, unbound until the person picks a
   // key (an empty chord matches nothing).
   ...(["a", "b"] as const).flatMap((deck): Binding[] =>
