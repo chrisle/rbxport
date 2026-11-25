@@ -157,8 +157,15 @@ struct BrowseCache {
     artwork_bytes: usize,
 }
 
+/// Parsed files are scoped to their library snapshot without retaining it.
+struct AnalysisCache {
+    epoch: u64,
+    entries: Vec<Arc<Parsed>>,
+}
+
 /// The three analysis files of one track, parsed, or `None` where absent.
 struct Parsed {
+    library: Weak<Library>,
     row: rbl_index::Row,
     dat: Option<Anlz>,
     ext: Option<Anlz>,
@@ -240,7 +247,7 @@ pub struct IndexCatalog {
     /// but kept across sessions (#540).
     colour: Played,
     /// Most recently used last.
-    analysis: Mutex<Vec<Arc<Parsed>>>,
+    analysis: Mutex<AnalysisCache>,
     /// Menus and their visible rows are shared between every player session.
     /// Entries carry a weak library identity, so a reload makes them vanish.
     browse: Mutex<BrowseCache>,
@@ -254,7 +261,7 @@ impl IndexCatalog {
             source,
             played,
             colour: Played::default(),
-            analysis: Mutex::new(Vec::with_capacity(ANALYSIS_CACHE)),
+            analysis: Mutex::new(AnalysisCache { epoch: 0, entries: Vec::with_capacity(ANALYSIS_CACHE) }),
             browse: Mutex::new(BrowseCache::default()),
             link_history: Mutex::new(LinkHistory::default()),
         }
@@ -1098,43 +1105,58 @@ impl IndexCatalog {
     }
 
     /// The parsed analysis files of a track, from the cache or the disk.
-    fn parsed(&self, library: &Library, row: rbl_index::Row) -> Option<Arc<Parsed>> {
-        {
+    fn parsed(&self, library: &Arc<Library>, row: rbl_index::Row) -> Option<Arc<Parsed>> {
+        self.parsed_with_reader(library, row, |path| {
+            std::fs::read(path).ok().and_then(|bytes| rbl_anlz::parse(&bytes).ok())
+        })
+    }
+
+    fn parsed_with_reader(
+        &self,
+        library: &Arc<Library>,
+        row: rbl_index::Row,
+        read: impl Fn(&std::path::Path) -> Option<Anlz>,
+    ) -> Option<Arc<Parsed>> {
+        let owner = Arc::downgrade(library);
+        let epoch = {
             let mut cache = self.analysis.lock();
-            if let Some(at) = cache.iter().position(|p| p.row == row) {
-                let hit = cache.remove(at);
-                cache.push(Arc::clone(&hit));
+            if let Some(at) = cache.entries.iter().position(|p| p.row == row && p.library.ptr_eq(&owner)) {
+                let hit = cache.entries.remove(at);
+                cache.entries.push(Arc::clone(&hit));
                 return Some(hit);
             }
-        }
+            cache.epoch
+        };
         let relative = library.analysis_path.get(row as usize);
         if relative.is_empty() {
             return None;
         }
         let dat_path = rbl_anlz::resolve(&self.source.share_root(), relative);
-        let read = |path: &std::path::Path| {
-            std::fs::read(path)
-                .ok()
-                .and_then(|bytes| rbl_anlz::parse(&bytes).ok())
-        };
         let parsed = Arc::new(Parsed {
+            library: owner,
             row,
             dat: read(&dat_path),
             ext: read(&rbl_anlz::sibling(&dat_path, "EXT")),
             two_ex: read(&rbl_anlz::sibling(&dat_path, "2EX")),
         });
         let mut cache = self.analysis.lock();
-        if cache.len() >= ANALYSIS_CACHE {
-            cache.remove(0);
+        // A read already in flight may finish, but a reload or analysis
+        // invalidation must prevent it from repopulating the cleared cache.
+        if cache.epoch == epoch {
+            if cache.entries.len() >= ANALYSIS_CACHE {
+                cache.entries.remove(0);
+            }
+            cache.entries.push(Arc::clone(&parsed));
         }
-        cache.push(Arc::clone(&parsed));
         Some(parsed)
     }
 
     /// Forgets parsed analysis files, for after a library reload or an
     /// analysis run: the next request reads the files again.
     pub fn forget_analysis(&self) {
-        self.analysis.lock().clear();
+        let mut cache = self.analysis.lock();
+        cache.epoch = cache.epoch.wrapping_add(1);
+        cache.entries.clear();
     }
 }
 
@@ -2857,6 +2879,118 @@ mod tests {
         assert_eq!(details.date_added, "2025-03-04");
         assert_eq!(details.row.bpm_x100, 12_800);
         assert!(c.track(99).is_none());
+    }
+
+    struct AnalysisSource {
+        library: Mutex<Arc<Library>>,
+        root: PathBuf,
+    }
+
+    impl Source for AnalysisSource {
+        fn library(&self) -> Option<Arc<Library>> { Some(Arc::clone(&self.library.lock())) }
+        fn share_root(&self) -> PathBuf { self.root.clone() }
+        fn details(&self, _id: &str) -> Option<rbl_db::details::TrackDetails> { None }
+    }
+
+    fn analysis_library(path: &str) -> Arc<Library> {
+        let mut library = library_from(&[TestTrack { id: 10, ..TestTrack::default() }]);
+        library.analysis_path = rbl_index::strings::StrColumn::default();
+        library.analysis_path.push(path);
+        Arc::new(library)
+    }
+
+    fn write_preview(root: &std::path::Path, path: &str, value: u8) {
+        let path = rbl_anlz::resolve(root, path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, rbl_anlz::AnlzBuilder::new().waveform_preview(b"PWAV", &[value]).finish()).unwrap();
+    }
+
+    #[test]
+    fn analysis_cache_binds_a_row_to_its_library_without_retaining_the_library() {
+        let root = tempfile::tempdir().unwrap();
+        write_preview(root.path(), "/old.DAT", 2);
+        write_preview(root.path(), "/new.DAT", 9);
+        let old = analysis_library("/old.DAT");
+        let weak = Arc::downgrade(&old);
+        let source = Arc::new(AnalysisSource { library: Mutex::new(old.clone()), root: root.path().into() });
+        let catalog = IndexCatalog::new(source.clone(), Played::default());
+        assert_eq!(catalog.analysis(10, &Wanted::WaveformPreview), Some(blobs::waveform_preview_blob(&[2], &[])));
+        *source.library.lock() = analysis_library("/new.DAT");
+        drop(old);
+        assert!(weak.upgrade().is_none(), "the cache must not retain a whole old library");
+        assert_eq!(catalog.analysis(10, &Wanted::WaveformPreview), Some(blobs::waveform_preview_blob(&[9], &[])));
+    }
+
+    fn preview_after_late_read(replace_library: bool, missing: bool) {
+        use std::sync::mpsc;
+        let root = tempfile::tempdir().unwrap();
+        if !missing { write_preview(root.path(), "/old.DAT", 2); }
+        let old = analysis_library("/old.DAT");
+        let source = Arc::new(AnalysisSource { library: Mutex::new(old.clone()), root: root.path().into() });
+        let catalog = Arc::new(IndexCatalog::new(source.clone(), Played::default()));
+        let reader = catalog.clone();
+        let (entered, waiting) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            reader.parsed_with_reader(&old, 0, |path| {
+                let result = std::fs::read(path).ok().and_then(|bytes| rbl_anlz::parse(&bytes).ok());
+                if path.extension().is_some_and(|ext| ext == "DAT") {
+                    entered.send(()).unwrap();
+                    resume.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+                }
+                result
+            })
+        });
+        waiting.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        let current = if replace_library { analysis_library("/new.DAT") } else { source.library().unwrap() };
+        write_preview(root.path(), current.analysis_path.get(0), 9);
+        *source.library.lock() = current;
+        // This must complete while file IO is paused, and must prevent its
+        // already-started read from repopulating the cache afterward.
+        catalog.forget_analysis();
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        assert_eq!(catalog.analysis(10, &Wanted::WaveformPreview), Some(blobs::waveform_preview_blob(&[9], &[])));
+    }
+
+    #[test]
+    fn a_late_read_cannot_repopulate_analysis_after_library_replacement() {
+        preview_after_late_read(true, false);
+    }
+
+    #[test]
+    fn a_late_read_cannot_repopulate_analysis_after_same_library_invalidation() {
+        preview_after_late_read(false, false);
+    }
+
+    #[test]
+    fn a_late_missing_read_cannot_hide_analysis_after_same_library_invalidation() {
+        preview_after_late_read(false, true);
+    }
+
+    #[test]
+    fn analysis_cache_keeps_its_bounded_least_recently_used_order() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let mut library = library_from(&(0..=ANALYSIS_CACHE).map(|row| TestTrack {
+            id: row as u64 + 1, ..TestTrack::default()
+        }).collect::<Vec<_>>());
+        library.analysis_path = rbl_index::strings::StrColumn::default();
+        for row in 0..=ANALYSIS_CACHE { library.analysis_path.push(&format!("/{row}.DAT")); }
+        let library = Arc::new(library);
+        let catalog = IndexCatalog::new(Arc::new(Fixed(library.clone())), Played::default());
+        let reads = AtomicUsize::new(0);
+        let read = |path: &std::path::Path| {
+            if path.extension().is_some_and(|ext| ext == "DAT") { reads.fetch_add(1, Ordering::Relaxed); }
+            None
+        };
+        for row in 0..ANALYSIS_CACHE { catalog.parsed_with_reader(&library, u32::try_from(row).unwrap(), read); }
+        assert_eq!(reads.load(Ordering::Relaxed), ANALYSIS_CACHE);
+        catalog.parsed_with_reader(&library, 0, read);
+        catalog.parsed_with_reader(&library, u32::try_from(ANALYSIS_CACHE).unwrap(), read);
+        catalog.parsed_with_reader(&library, 0, read);
+        assert_eq!(reads.load(Ordering::Relaxed), ANALYSIS_CACHE + 1, "the touched row remains cached");
+        catalog.parsed_with_reader(&library, 1, read);
+        assert_eq!(reads.load(Ordering::Relaxed), ANALYSIS_CACHE + 2, "the oldest untouched row was evicted");
     }
 
     #[test]
