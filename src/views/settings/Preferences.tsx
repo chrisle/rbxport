@@ -1,3 +1,4 @@
+import { useReportWindow } from "@/store/useReportWindow";
 import type { VuDisplay } from "@/lib/vuMeter";
 /**
  * The Preferences window.
@@ -21,7 +22,6 @@ import {
   LinkIcon,
 } from "@/components/icons";
 import { useTranslation } from "@/i18n";
-import { getBackend } from "@/ipc/client";
 import { ReportBug } from "@/views/report/ReportBug";
 import type { LibrarySummary, Limiter } from "@/ipc/types";
 import { usePreferencesContext } from "@/store/usePreferences";
@@ -169,19 +169,14 @@ export function Preferences({
   const [query, setQuery] = useState("");
   const t = useTranslation();
   const { reset } = usePreferencesContext();
-  const [reportOpen, setReportOpen] = useState(false);
-  const openReport = () => {
-    void getBackend().then((backend) => backend.openReportWindow()).then((opened) => {
-      if (!opened) setReportOpen(true);
-    }).catch(() => setReportOpen(true));
-  };
+  const { reportOpen, openReport, closeReport } = useReportWindow();
 
   useEffect(() => {
     // Focus the window so Escape reaches it and a reader lands inside.
     if (!reportOpen) window_.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (reportOpen) setReportOpen(false);
+        if (reportOpen) closeReport();
         else onClose();
       }
     };
@@ -189,7 +184,7 @@ export function Preferences({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [onClose, reportOpen]);
+  }, [onClose, reportOpen, closeReport]);
 
   // A section target lands on its section, once its pane is the one shown.
   useLayoutEffect(() => {
@@ -358,7 +353,7 @@ export function Preferences({
           {body}
         </div>
       )}
-      {reportOpen ? <ReportBug onClose={() => setReportOpen(false)} /> : null}
+      {reportOpen ? <ReportBug onClose={closeReport} /> : null}
     </>
   );
 }

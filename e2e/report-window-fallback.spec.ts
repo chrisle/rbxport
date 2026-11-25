@@ -91,3 +91,47 @@ test("a closed Preferences window does not reopen for a late rejected report lau
   expect(errors).toEqual([]);
   expect(requests).toEqual(["GET /verify"]);
 });
+
+for (const origin of ["status", "preferences"] as const) {
+  for (const staleOutcome of ["reject", "inline"] as const) {
+    for (const latestOutcome of ["inline", "native"] as const) {
+      test(`a stale ${staleOutcome} cannot replace the latest ${latestOutcome} report request from ${origin}`, async ({ page }) => {
+        const requests = await isolateReportRequests(page);
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.goto("/");
+        await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+        await page.evaluate(async ({ staleOutcome, latestOutcome }) => {
+          const moduleUrl = "/src/ipc/client.ts";
+          const { getBackend } = await import(moduleUrl) as typeof import("../src/ipc/client");
+          let calls = 0;
+          (await getBackend()).openReportWindow = () => ++calls === 1 ? new Promise((resolve, reject) => {
+            Object.assign(window, { completeStaleNativeReport: () => {
+              if (staleOutcome === "reject") reject(new Error("Retired fixture window request"));
+              else resolve(false);
+            } });
+          }) : Promise.resolve(latestOutcome === "native");
+        }, { staleOutcome, latestOutcome });
+        const button = await reportButton(page, origin);
+        await button.click();
+        await expect.poll(() => page.evaluate(() => typeof (window as unknown as {
+          completeStaleNativeReport?: unknown;
+        }).completeStaleNativeReport)).toBe("function");
+        await button.click();
+        const report = page.getByRole("dialog", { name: "Report bug", exact: true });
+        if (latestOutcome === "inline") {
+          await expect(report).toBeVisible();
+          await report.getByRole("button", { name: "Close report" }).click();
+        }
+        await expect(report).toHaveCount(0);
+        await page.evaluate(async () => {
+          (window as unknown as { completeStaleNativeReport: () => void }).completeStaleNativeReport();
+          await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        });
+        await expect(report).toHaveCount(0);
+        expect(errors).toEqual([]);
+        expect(requests).toEqual(latestOutcome === "inline" ? ["GET /verify"] : []);
+      });
+    }
+  }
+}

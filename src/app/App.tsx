@@ -18,6 +18,7 @@ import { waveformKindOf } from "@/canvas";
 import { useAutoJoinLink } from "@/store/useAutoJoinLink";
 import { useEventCallback } from "@/store/useEventCallback";
 import { useCommands } from "@/store/useCommands";
+import { useReportWindow } from "@/store/useReportWindow";
 /**
  * Export-mode shell.
  *
@@ -499,11 +500,7 @@ function AppBody() {
       if (!opened) setSyncOpen(true);
     });
   }, []);
-  const [reportOpen, setReportOpen] = useState(false);
-  const openReport = useCallback(() => {
-    void getBackend().then(backend => backend.openReportWindow()).then(opened => { if (!opened) setReportOpen(true); })
-      .catch(() => setReportOpen(true));
-  }, []);
+  const { reportOpen, openReport, closeReport } = useReportWindow();
   // The Log window, the same way again: clicking the status bar's message
   // opens it, or brings the open one to the front.
   const [logOpen, setLogOpen] = useState(false);
@@ -3789,7 +3786,7 @@ function AppBody() {
           onClose={() => setSettingsOpen(null)}
         />
       ) : null}
-      {reportOpen ? <ReportBug onClose={() => setReportOpen(false)} /> : null}
+      {reportOpen ? <ReportBug onClose={closeReport} /> : null}
       {logOpen ? <LogView onClose={() => setLogOpen(false)} /> : null}
       {smartEditor ? (
         <SmartPlaylistEditor
