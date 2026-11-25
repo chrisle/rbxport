@@ -128,6 +128,8 @@ import styles from "./Player.module.css";
 export interface PlayerProps {
   /** The row the browser has selected, or `null` when nothing is. */
   track: RowDto | null;
+  /** A successful explicit Load, separate from row metadata and remounts. */
+  loadIntent?: number;
   /** Which engine deck this drives. The 2-player layout adds a second. */
   deck?: DeckId;
   /**
@@ -888,14 +890,14 @@ function CueName({ cue, renaming, setRenaming, canEdit, onSave }: {
 export const Player = memo(function Player({
   track, onEject, onError, onAnalyse, onDropTrack, onLoadSelected, onSkipTrack, selectedTrackId = null,
   onExportTrack, devices = [], onExportLoop,
-  dragging = false, deck = "a",
+  dragging = false, deck = "a", loadIntent = 0,
   simple = false, transportSlot, flipped = false, dual = false, publishZoom, onWheelZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
   publishSync, peerSync, isMaster = false, onMaster, synced = false, syncOn = synced, onSyncToggle, onStartPlaying, onLoadedTrack,
   leaderBpmX100 = null, onPlayingBpm, onKeyShift, onGridNudge, publishGridFollow, readOnly = false,
   drawing = false,
 }: PlayerProps) {
-  const playback = usePlayback(track?.id ?? null, deck, false);
+  const playback = usePlayback(track?.id ?? null, deck, false, loadIntent);
   useEffect(() => { onLoadedTrack?.(playback.loadedTrack); }, [onLoadedTrack, playback.loadedTrack]);
   const t = useTranslation();
   // A waveform to draw: the analysis's, or one an analysis is drawing now.
@@ -981,7 +983,7 @@ export const Player = memo(function Player({
   const cues = useTrackCues(track, (loaded) => {
     const first = cuesFor(loaded, "memory")[0];
     setCuePoint(first ? first.positionMs / 1000 : 0);
-  });
+  }, loadIntent);
   // Until the player menu turns it on, a saved loop is only a marker.
   const [activeLoopPlayback, setActiveLoopPlayback] = useState(false);
   useEffect(() => {

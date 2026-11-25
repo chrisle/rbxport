@@ -70,3 +70,18 @@ it("keeps current cues during a metadata refresh of the same device source", asy
   await settle();
   expect(host.textContent).toBe("1");
 });
+
+
+it("settles the load cue again for explicit same-row reloads, but not an unchanged render", async () => {
+  const track = { id: "42" } as RowDto;
+  const onLoaded = vi.fn();
+  let intent = 0;
+  function LoadedProbe() { useTrackCues(track, onLoaded, intent); return null; }
+  act(() => root.render(<LoadedProbe />)); await settle();
+  expect(onLoaded).toHaveBeenCalledTimes(1);
+  act(() => root.render(<LoadedProbe />)); await settle();
+  expect(onLoaded).toHaveBeenCalledTimes(1);
+  intent++;
+  act(() => root.render(<LoadedProbe />)); await settle();
+  expect(onLoaded).toHaveBeenCalledTimes(2);
+});

@@ -103,6 +103,8 @@ The shell keeps the states (`set_menu_enabled`).
 | Volume, Volume Down (`volumeUp`, `volumeDown`) | command + F12, command + F11 | 3003, 3004 | no | key; the master knob sets the level directly | App, none |
 | Mute (`mute`) | command + F10 | 3005 | no | key | App, none |
 
+An explicit Load also reloads a track already on that deck, using the ordinary load behavior: restart at the beginning and retain the deck's play/pause intent. A layout remount or a row metadata refresh does not reload it. A missing-file refusal leaves the previous track loaded.
+
 ### Deck
 
 | Command | Key (Player A) | rekordbox id | rekordbox menu bar | On-screen control that calls the same function |

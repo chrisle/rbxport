@@ -23,6 +23,7 @@ export function useTrackCues(
    * every refetch — a cue added mid-track must not move the cue point.
    */
   onLoaded?: (cues: Cue[]) => void,
+  loadIntent = 0,
 ): Cue[] {
   const [snapshot, setSnapshot] = useState<{ id: string; source: RowDto["deviceSource"]; cues: Cue[] } | null>(null);
   // A ref so the fetch effect does not re-run when the callback's identity
@@ -79,7 +80,7 @@ export function useTrackCues(
       stopCues?.();
       stopLibrary?.();
     };
-  }, [track]);
+  }, [track, loadIntent]);
 
   // A new track must never see the previous track's Kind-4 candidate while
   // its own cue request is in flight.

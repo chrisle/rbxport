@@ -169,6 +169,7 @@ const FALLBACK = "This track could not be played.";
 interface HeldLoad {
   trackId: string;
   loadId: number;
+  intent: number;
 }
 
 const held = new Map<DeckId, HeldLoad | null>();
@@ -197,7 +198,7 @@ export function reasonFrom(error: unknown): string {
   return FALLBACK;
 }
 
-export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK, renderPosition = true): Playback {
+export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK, renderPosition = true, loadIntent = 0): Playback {
   const [playing, setPlaying] = useState(false);
   const [loadedTrack, setLoadedTrack] = useState<LoadedTrack | null>(confirmedLoads.get(DECK) ?? null);
   const publishOwner = useCallback((owner: LoadedTrack | null) => {
@@ -228,6 +229,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   /** The selected load, and the one whose audio is actually ready. */
   const selectedTrack = useRef(trackId);
   selectedTrack.current = trackId;
+  const selectedIntent = useRef(loadIntent);
+  selectedIntent.current = loadIntent;
   const targetLoad = useRef<HeldLoad | null>(held.get(DECK) ?? null);
   const readyLoad = useRef(0);
   const loadPending = useRef(false);
@@ -325,7 +328,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   /** Starts a uniquely identified load; stale completions cannot satisfy it. */
   const beginLoad = useCallback((nextTrack: string, restore: boolean) => {
     const previousOwner = confirmedLoads.get(DECK) ?? null;
-    const request = { trackId: nextTrack, loadId: allocateLoadId() };
+    const request = { trackId: nextTrack, loadId: allocateLoadId(), intent: selectedIntent.current };
     publishOwner(null);
     targetLoad.current = request;
     held.set(DECK, request);
@@ -534,8 +537,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         unlistenReset();
       };
       // What the deck holds right now, so a reload does not start at zero.
+      const requested = targetLoad.current;
+      const ready = readyLoad.current;
       const state = await backend.deckState();
-      if (!live) return;
+      // A newer request or completion outranks this initial snapshot.
+      if (!live || targetLoad.current !== requested || readyLoad.current !== ready) return;
       const deck = DECK === "b" ? state.b : state.a;
       const target = targetLoad.current;
       if (target !== null && deck.loadId !== undefined && deck.loadId !== target.loadId && !loadPending.current) {
@@ -555,10 +561,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   useEffect(() => {
     if (!canPlay) return;
     // The deck already holds this track: the view was put away and brought
-    // back around it, and the engine never stopped. Asking again would. Where
+    // back around it, and the engine never stopped. A new explicit load intent
+    // still reloads the same file. Asking again on remount would stop it. Where
     // it has got to arrives with `deckState` above, and with the next tick.
     const current = held.get(DECK);
-    if ((current?.trackId ?? null) === trackId) return;
+    if ((current?.trackId ?? null) === trackId && (trackId === null || current?.intent === loadIntent)) return;
     if (trackId !== null) {
       // PLAY/PAUSE belongs to the deck, not to the file. Loading another
       // track while PLAY is engaged starts that track as soon as it is ready;
@@ -588,7 +595,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     setError(null);
     emit(0);
     void getBackend().then((backend) => backend.deckUnload(DECK)).catch((failure) => setError(reasonFrom(failure)));
-  }, [trackId, beginLoad, emit, DECK, setPosition, publishOwner]);
+  }, [trackId, loadIntent, beginLoad, emit, DECK, setPosition, publishOwner]);
 
   // One frame loop for the whole player, running only while audio is, so an
   // idle window schedules nothing.
