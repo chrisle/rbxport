@@ -87,3 +87,16 @@ it("does not borrow a previous track's pixels while the new track is unavailable
   show("3band", "second-track"); expect(drawn).toBeNull(); await drain();
   pending.resolve(new Uint8Array()); await drain(); expect(drawn).toBeNull();
 });
+
+it.each([false, true])("retains same-key pixels during incidental rerenders until the refreshed result (missing=%s)", async missing => {
+  show("3band"); await drain(); expect(drawn).toBe(11);
+  const pending = deferred(); read.mockReturnValueOnce(pending.promise);
+  act(() => changed("palette-fixture")); await drain();
+  expect(drawn).toBe(11);
+  // New cue-prop array, same track/palette/size: do not blank while joining
+  // the refresh that has already invalidated its cached bitmap.
+  show("3band"); expect(drawn).toBe(11); await drain();
+  expect(read).toHaveBeenCalledTimes(2);
+  pending.resolve(missing ? new Uint8Array() : new Uint8Array([33])); await drain();
+  expect(drawn).toBe(missing ? null : 33);
+});
