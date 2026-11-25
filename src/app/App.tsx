@@ -3567,7 +3567,7 @@ function AppBody() {
           aria-valuenow={treeWidth}
         />
         {selectedDevice ? (
-          <Suspense fallback={null}><DevicePanel
+          <Suspense fallback={<div aria-hidden />}><DevicePanel
             device={selectedDevice}
             playlists={tree}
             onSync={syncToDevice}
