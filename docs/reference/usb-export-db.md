@@ -1399,7 +1399,8 @@ both extended lists. Entries within each list preserve descending source
 
 Source `OutMsec` below zero or outside u32 means no loop. `BeatLoopSize`
 contains the numerator in its high 16 bits and denominator in its low 16.
-For memory cues, source `Color` is a u8 except 255; invalid/255 becomes 0.
+For memory cues, source `Color` 0–7 becomes exported `PCP2` color row 1–8
+(`Color + 1`). No Color (-1 or 255) and unsupported values become row 0.
 Source `ColorTableIndex` supplies the extended color code. Source `Kind` 4
 is the memory loop set as the track's Active Loop: it goes in the memory list
 with slot 0 and the active flag, as rekordbox 7.2.19's
