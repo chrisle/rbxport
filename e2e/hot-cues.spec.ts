@@ -25,7 +25,7 @@ const overviewBadge = (page: Page, letter: string) =>
   page.getByTestId("player-overview").locator(`[data-cue="${letter}"]`);
 const detailBadge = (page: Page, letter: string) =>
   page.getByTestId("player-detail").locator(`[data-cue="${letter}"]`);
-/** The browser's attribute cell for the loaded row: CUE when the track has hot cues. */
+/** The Attribute cell for the fourth fixture row, loaded or ejected. */
 const cueMark = (page: Page) => page.locator('[role="gridcell"][data-col="attr"]').nth(3);
 const elapsed = (page: Page) => player(page).locator('[class*="elapsed"]');
 /** The elapsed readout in seconds: `01:23.4` is 83.4. */
@@ -145,33 +145,67 @@ test("the simple player's overview wears the badge too", async ({ page }) => {
   await expect(strip.locator('[data-cue="E"]')).toHaveCount(1);
 });
 
-test("the browser row's CUE mark follows the deck without a reload", async ({ page }) => {
+test("the browser row's CUE mark follows edits with loaded-mark precedence", async ({ page }) => {
   await load(page, "?writable=1");
   // The Attribute column is off by default; the header menu turns it on.
   await page.getByRole("columnheader", { name: /BPM/ }).click({ button: "right" });
   await page.getByRole("menu", { name: "Columns" }).getByRole("menuitemcheckbox", { name: "Attribute" }).click();
-  await expect(cueMark(page)).toContainText("CUE");
   const rows = page.locator('[role="row"]');
   const rowCount = await rows.count();
+  const titleCell = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  const title = await titleCell.innerText();
+  const lifetime = await page.evaluate(() => performance.timeOrigin);
+  const loadedMark = cueMark(page).getByRole("img", { name: "Loaded", exact: true });
+  const eject = async () => {
+    await player(page).getByRole("button", { name: "Eject", exact: true }).click();
+    await expect(loadedMark).toHaveCount(0);
+    await expect(rows).toHaveCount(rowCount);
+    await expect(titleCell).toHaveText(title);
+  };
+  const reload = async () => {
+    await titleCell.dblclick();
+    await expect(playButton(page)).toBeEnabled();
+    await panel(page).getByRole("tab", { name: "HOT CUE" }).click();
+    await expect(loadedMark).toBeVisible();
+    await expect(cueMark(page)).not.toContainText("CUE");
+  };
 
-  // Clearing all four hot cues empties the row's letters, and the mark goes.
+  // Loaded takes precedence over CUE, including while paused. Ejecting
+  // exposes the same row's existing CUE indicator before any edit.
+  await expect(loadedMark).toBeVisible();
+  await expect(cueMark(page)).not.toContainText("CUE");
+  await eject();
+  await expect(cueMark(page)).toContainText("CUE");
+  await reload();
+
+  // Clear the four committed hot cues. The loaded marker remains; when
+  // ejected the unloaded row now has no CUE indicator.
   for (const letter of ["A", "B", "C", "D"]) {
     await clearButton(page, letter).click();
     await expect(clearButton(page, letter)).toHaveCount(0);
   }
+  await expect(loadedMark).toBeVisible();
+  await eject();
   await expect(cueMark(page)).not.toContainText("CUE");
-  // No reload: the table kept its rows.
-  await expect(rows).toHaveCount(rowCount);
+  await reload();
 
-  // `1` is `Set Hot Cue A`; the mark comes back with the letter.
+  // Set Hot Cue A through the ordinary command, then expose its new CUE
+  // indicator without reloading the page or changing the browser's view.
   await playAWhile(page);
   await page.keyboard.press("1");
   await expect(pad(page, "A")).toHaveAttribute("aria-pressed", "true");
+  await expect(loadedMark).toBeVisible();
+  await eject();
   await expect(cueMark(page)).toContainText("CUE");
-  // `command + 1` is `Clear Hot Cue A`.
+  await reload();
+
+  // Clearing A is reflected in the same unloaded row, too.
   await page.keyboard.press("Meta+1");
   await expect(pad(page, "A")).toHaveAttribute("aria-pressed", "false");
+  await expect(loadedMark).toBeVisible();
+  await eject();
   await expect(cueMark(page)).not.toContainText("CUE");
+  expect(await page.evaluate(() => performance.timeOrigin)).toBe(lifetime);
 });
 
 test("with rekordbox holding the library, setting and clearing are refused and calling is not", async ({ page }) => {
