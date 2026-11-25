@@ -184,7 +184,8 @@ change the button's grid transformation or reuse TAP/Shift Beatgrid to center.
   in #513. Cloud and sharing commands remain excluded.
 - [UNKNOWN] When rekordbox greys Track › Analyze Track
   (`BrowseBasicView::isActiveCommand` @0x1003153cc passes the question on
-  to the list and tree viewers). RBXport's item is always enabled, and with
-  nothing selected it does nothing, which is what the key does.
+  to the list and tree viewers). RBXport enables it only for the focused
+  main-browser list with a nonempty selection of collection-backed rows,
+  at least one treated as present, and a registered analysis command.
 
 Show in Finder (`showInFinder`): rbxport defaults to Command+R on macOS and Ctrl+R on Windows. Select one track in the active browser or playlist to reveal and highlight its audio file in the system file manager. Change or remove the shortcut in Preferences › Keyboard › Track. Missing files and multiple selections are not revealed; typing in a field does not trigger it. This default is an rbxport choice. Performance presets retain their own mappings: Performance 1 leaves reveal unbound so Command/Ctrl+R still runs Jump Reverse; Performance 2 binds reveal to Command/Ctrl+R.
