@@ -1784,6 +1784,32 @@ describe("mounted-volume estimate identity", () => {
     expect(status()).toContain("USB B: Not enough temporary space to sync safely");
   });
 
+  it.each([false, true])("checks fresh preflight identity before consuming an insufficient estimate (replacement=%s)", async (replacement) => {
+    estimateSync.mockResolvedValueOnce([estimate(false)]);
+    await select();
+    listDevices.mockResolvedValue(replacement ? replaced : DEVICES.map(device => ({ ...device })));
+    // No device notification: SYNC itself first discovers the new mounted volume.
+    click(syncButton()); await settle(); await settle();
+    expect(syncDevices).toHaveBeenCalledTimes(replacement ? 1 : 0);
+    if (replacement) {
+      expect(syncDevices.mock.calls[0]?.[1]).toEqual([path]);
+      expect(status()).not.toContain("Not enough temporary space");
+    } else expect(status()).toContain("USB B: Not enough temporary space to sync safely");
+  });
+
+  it("ignores only the replaced volume's old insufficiency during fresh multi-device preflight", async () => {
+    estimateSync.mockResolvedValueOnce([estimate(false), { ...estimate(false), path: "/Volumes/USB A" }]);
+    vi.useFakeTimers();
+    click(box("Closing")); click(box("USB A")); click(box("USB B")); await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    listDevices.mockResolvedValue(replaced);
+    click(syncButton()); await settle(); await settle();
+    expect(syncDevices).toHaveBeenCalledTimes(1);
+    expect(syncDevices.mock.calls[0]?.[1]).toEqual([path]);
+    expect(status()).toContain("USB A: Not enough temporary space to sync safely");
+    expect(status()).not.toContain("USB B: Not enough temporary space");
+  });
+
   it("does not repeat the estimate for an unchanged-owner notification with equal geometry", async () => {
     await select();
     listDevices.mockResolvedValue(DEVICES.map(device => ({ ...device })));

@@ -151,7 +151,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   const [expandedDevices, setExpandedDevices] = useState<ReadonlySet<string>>(new Set());
   const [deviceErrors, setDeviceErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [states, setStates] = useState<ReadonlyMap<string, DeviceSyncState>>(new Map());
-  const [estimates, setEstimates] = useState<ReadonlyMap<string, SyncEstimate>>(new Map());
+  const [estimates, setEstimates] = useState<ReadonlyMap<string, { estimate: SyncEstimate; volumeId: string | undefined }>>(new Map());
   const [estimatesLoading, setEstimatesLoading] = useState(false);
   const [estimateRefresh, setEstimateRefresh] = useState(0);
   const [query, setQuery] = useState("");
@@ -242,7 +242,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   // ticking has settled. A key rather than the device list: that is re-read
   // on a timer and would restart the estimate every time.
   const estimateDevices = [...tickedDevices].sort().join("\n");
-  const capacityRevision = devices.map(d => `${d.path}:${d.volumeId}:${d.totalBytes}:${d.freeBytes}:${d.fileSystem}`).join("\n");
+  const capacityRevision = JSON.stringify(devices.map(d => [d.path, d.volumeId, d.totalBytes, d.freeBytes, d.fileSystem]));
   const reported = completedReports.size;
   useEffect(() => {
     const ids = nodes.filter((n) => isExportablePlaylist(n) && ticked.has(n.id)).map((n) => n.id);
@@ -252,13 +252,16 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
       setEstimatesLoading(false);
       return;
     }
+    // Capture the exact owners represented by this revision, not a later
+    // render's device list. The estimate and its owner publish together.
+    const owners = new Map((JSON.parse(capacityRevision) as [string, string, ...unknown[]][]).map(([path, volumeId]) => [path, volumeId]));
     setEstimates(new Map());
     setEstimatesLoading(true);
     let live = true;
     const timer = window.setTimeout(() => {
       void getBackend()
         .then((backend) => backend.estimateSync(ids, destinations, deleteUnlistedMusic, compatibilityFormat))
-        .then((found) => { if (live) { setEstimates(new Map(found.map((e) => [e.path, e] as const))); setEstimatesLoading(false); } })
+        .then((found) => { if (live) { setEstimates(new Map(found.map((e) => [e.path, { estimate: e, volumeId: owners.get(e.path) }] as const))); setEstimatesLoading(false); } })
         .catch((error: unknown) => {
           if (!live) return;
           const loading = error !== null && typeof error === "object"
@@ -268,7 +271,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
           // messages and details can contain private paths or developer data.
           const message = t(loading ? "The library has not finished loading yet."
             : "Could not calculate space. Refresh the device and try again.");
-          setEstimates(new Map(destinations.map(path => [path, { path, copyBytes: 0, freeBytes: 0, reuseBytes: 0, tracksNew: 0, tracksChanged: 0, tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: true, unknownSize: true, error: message }])));
+          setEstimates(new Map(destinations.map(path => [path, { volumeId: owners.get(path), estimate: { path, copyBytes: 0, freeBytes: 0, reuseBytes: 0, tracksNew: 0, tracksChanged: 0, tracksKept: 0, tracksRemoved: 0, tracksMissing: 0, approximate: true, unknownSize: true, error: message } }])));
           setEstimatesLoading(false);
         });
     }, 200);
@@ -746,7 +749,11 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
         // library unless Import is clicked (#199).
         const ineligible = new Map<string, string>();
         for (const path of destinations) {
-          if (estimates.get(path)?.enoughSpace === false) ineligible.set(path, t("Not enough temporary space to sync safely"));
+          const measured = estimates.get(path);
+          const current = currentDevices.find(device => device.path === path);
+          if (measured && current && measured.volumeId === current.volumeId && measured.estimate.enoughSpace === false) {
+            ineligible.set(path, t("Not enough temporary space to sync safely"));
+          }
         }
         const eligible = destinations.filter(path => !ineligible.has(path));
         if (eligible.length === 0) {
@@ -1136,7 +1143,8 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
               const used = device.totalBytes > 0 ? formatSpace(Math.max(0, device.totalBytes - device.freeBytes)) || "0.0 GB" : "";
               // What the ticked playlists would add, net of what the sync
               // takes off: the stick's own copies are already in "used".
-              const estimate = on ? estimates.get(device.path) : undefined;
+              const measured = on ? estimates.get(device.path) : undefined;
+              const estimate = measured?.volumeId === device.volumeId ? measured?.estimate : undefined;
               const net = estimate?.netAdditionalBytes ?? (estimate ? estimate.copyBytes - estimate.freeBytes : 0);
               const adding = Math.max(0, net);
               const freeing = Math.max(0, -net);
