@@ -85,8 +85,9 @@ fn ok(b: &[u8]) -> Reader<'_> {
     r.reader()
 }
 fn open(s: &Server, path: &str) -> Handle {
+    let (export, relative) = rbl_link::files::split(path).unwrap();
     let mut a = Writer::new();
-    a.utf16("/");
+    a.utf16(&export);
     let b = ask(
         s,
         PROGRAM_MOUNT,
@@ -97,7 +98,7 @@ fn open(s: &Server, path: &str) -> Handle {
     let mut r = ok(&b);
     assert_eq!(r.u32().unwrap(), nfs_status::OK);
     let mut h = Handle::from_slice(r.opaque_fixed(HANDLE_LEN).unwrap()).unwrap();
-    for part in path.split('/').filter(|p| !p.is_empty()) {
+    for part in relative.split('/').filter(|p| !p.is_empty()) {
         let mut a = Writer::new();
         a.opaque_fixed(h.as_bytes()).utf16(part);
         let b = ask(
