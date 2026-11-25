@@ -5,7 +5,7 @@
  * These tests hold completions back so superseded tracks and an audio-engine
  * rebuild cannot reset the deck after the newest action has been accepted.
  */
-import { act } from "react";
+import { act, startTransition, StrictMode, Suspense, useLayoutEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -34,11 +34,12 @@ let host: HTMLDivElement;
 let root: Root;
 let deck: Playback;
 let track: string | null = "track-a";
+let engineState: Tick = emptyTick;
 let intent = 0;
 let loaded: (event: DeckEvent) => void;
 let tick: (value: Tick) => void;
 let reset: () => void;
-let loads: { track: string; id: number }[];
+let loads: { track: string; id: number; deck: "a" | "b" }[];
 let sent: string[];
 let tempoWrites: number[];
 let tempoResult: (value: number) => Promise<void>;
@@ -50,7 +51,7 @@ const done = () => Promise.resolve();
 
 function backend(): Backend {
   return {
-    deckState: () => Promise.resolve(emptyTick),
+    deckState: () => Promise.resolve(engineState),
     onDeckTick: (listener: (tick: Tick) => void) => {
       tickSubscriptions++;
       tick = listener;
@@ -65,7 +66,7 @@ function backend(): Backend {
       return () => { resetListeners.delete(listener); };
     },
     deckLoad: (_deck: "a" | "b", next: string, loadId: number) => {
-      loads.push({ track: next, id: loadId });
+      loads.push({ track: next, id: loadId, deck: _deck });
       return done();
     },
     deckUnload: () => { unloads++; return done(); },
@@ -103,6 +104,7 @@ function finish(request: { id: number }) {
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  engineState = emptyTick;
   loads = [];
   unloads = 0;
   tickSubscriptions = 0;
@@ -931,4 +933,121 @@ it("cancels a scheduled deadline when Pause is followed by immediate ordinary Pl
   now = 1086;
   act(() => frame?.(now));
   expect(deck.positionRef.current).toBeCloseTo(10.016, 8);
+});
+
+
+it.each(["another", "empty", "intent"] as const)("resets the committed selection during a suspended %s transition", async (attempt) => {
+  const original = track!;
+  const blocked = new Promise<void>(() => undefined);
+  let attempted = false;
+  function ConcurrentProbe({ id, revision, suspend = false }: { id: string | null; revision: number; suspend?: boolean }) {
+    const current = usePlayback(id, "b", true, revision);
+    if (suspend) {
+      attempted = true;
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- React Suspense throws a pending promise.
+      throw blocked;
+    }
+    deck = current;
+    return <span>{id ?? "empty"}</span>;
+  }
+  await act(async () => { root.render(<Suspense fallback={<span>Waiting</span>}><ConcurrentProbe id={original} revision={0} /></Suspense>); await done(); });
+  finish(loads.at(-1)!);
+  await settle();
+  const before = loads.length;
+  await act(async () => {
+    startTransition(() => root.render(<Suspense fallback={<span>Waiting</span>}><ConcurrentProbe id={attempt === "another" ? "uncommitted-track" : attempt === "empty" ? null : original} revision={1} suspend /></Suspense>));
+    await done();
+  });
+  expect(attempted).toBe(true);
+  expect(host.textContent).toBe(original);
+  act(() => reset());
+  await settle();
+  expect(loads.slice(before).map(request => request.track)).toEqual([original]);
+  await act(async () => { root.render(<Suspense fallback={<span>Waiting</span>}><ConcurrentProbe id={original} revision={0} /></Suspense>); await done(); });
+  expect(loads).toHaveLength(before + 1);
+  const restored = loads.at(-1)!;
+  finish(restored);
+  await settle();
+  engineState = { ...emptyTick, b: { ...emptyDeck, loaded: true, loadId: restored.id, totalFrames: RATE * 300 } };
+  await act(async () => { root.render(<span>Hidden</span>); await done(); });
+  const hiddenCount = loads.length;
+  act(() => reset());
+  await settle();
+  expect(loads).toHaveLength(hiddenCount);
+  await act(async () => { root.render(<Suspense fallback={<span>Waiting</span>}><ConcurrentProbe id={original} revision={0} /></Suspense>); await done(); });
+  expect(loads).toHaveLength(before + 1);
+
+});
+
+
+it("does not reset the previous deck owner during a committed deck-route change", async () => {
+  const original = track!;
+  function RouteProbe({ id, channel, fire = false }: { id: string | null; channel: "a" | "b"; fire?: boolean }) {
+    deck = usePlayback(id, channel);
+    useLayoutEffect(() => { if (fire) reset(); }, [fire]);
+    return <span>{id ?? "empty"}</span>;
+  }
+  await act(async () => { root.render(<RouteProbe id={original} channel="a" />); await done(); });
+  const before = loads.length;
+  await act(async () => { root.render(<RouteProbe id="route-B" channel="b" fire />); await done(); });
+  expect(loads.slice(before).map(({ deck, track }) => ({ deck, track }))).toEqual([{ deck: "b", track: "route-B" }]);
+  await act(async () => { root.render(<RouteProbe id={null} channel="b" />); await done(); });
+  const removedCount = loads.length;
+  act(() => reset());
+  await settle();
+  expect(loads).toHaveLength(removedCount);
+  const retired = [...resetListeners];
+  await act(async () => { root.render(<span>Hidden</span>); await done(); });
+  act(() => { for (const listener of retired) listener(); });
+  await settle();
+  expect(loads).toHaveLength(removedCount);
+});
+
+it("restores the real committed track and intent once after a StrictMode reset", async () => {
+  await act(async () => { root.render(<StrictMode><Probe /></StrictMode>); await done(); });
+  const before = loads.length;
+  expect(resetListeners.size).toBe(1);
+  act(() => reset());
+  await settle();
+  expect(loads.slice(before).map(request => request.track)).toEqual([track]);
+  const restored = loads.at(-1)!;
+  finish(restored);
+  await settle();
+  engineState = { ...emptyTick, b: { ...emptyDeck, loaded: true, loadId: restored.id, totalFrames: RATE * 300 } };
+  await act(async () => { root.render(<span>Hidden</span>); await done(); });
+  await act(async () => { root.render(<StrictMode><Probe /></StrictMode>); await done(); });
+  expect(loads).toHaveLength(before + 1);
+});
+
+it("reconciles a real held-load mismatch for a newly committed selection and keeps its intent", async () => {
+  const first = loads[0]!;
+  finish(first); await settle();
+  let answer: (value: Tick) => void = () => {};
+  __setBackend({ ...backend(), deckState: () => new Promise<Tick>(resolve => { answer = resolve; }) });
+  act(() => root.unmount()); root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await done(); });
+  intent++;
+  await select("committed-B");
+  const second = loads.at(-1)!;
+  finish(second); await settle();
+  const oldSnapshot: Tick = { ...emptyTick, b: { ...emptyDeck, loaded: true, loadId: first.id } };
+  await act(async () => { answer(oldSnapshot); await done(); });
+  expect(loads).toHaveLength(2);
+  expect(deck.loadedTrack).toEqual(["committed-B", second.id]);
+
+  // A real remount whose current engine holds another load must still
+  // restore the newly committed B; the old snapshot above was only stale.
+  __setBackend({ ...backend(), deckState: () => Promise.resolve(oldSnapshot) });
+  act(() => root.unmount()); root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await done(); });
+  expect(loads).toHaveLength(3);
+  const restored = loads.at(-1)!;
+  expect(restored.track).toBe("committed-B");
+  finish(restored); await settle();
+  engineState = { ...emptyTick, b: { ...emptyDeck, loaded: true, loadId: restored.id } };
+  __setBackend(backend());
+  act(() => root.unmount()); root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await done(); });
+  expect(loads).toHaveLength(3);
+  expect(deck.loadedTrack).toEqual(["committed-B", restored.id]);
 });

@@ -11,7 +11,7 @@
  * between is that anchor plus the time since it arrived. Sixty ticks a second
  * would be IPC churn and the interface would still have to interpolate.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { confirmedLoads } from "./useLoadedTracks";
 import { getBackend } from "@/ipc/client";
@@ -227,10 +227,14 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   /** The generation the playhead last snapped to. */
   const shownGeneration = useRef(0);
   /** The selected load, and the one whose audio is actually ready. */
-  const selectedTrack = useRef(trackId);
-  selectedTrack.current = trackId;
-  const selectedIntent = useRef(loadIntent);
-  selectedIntent.current = loadIntent;
+  const selectedLoad = useRef<{ trackId: string | null; intent: number; deck: DeckId } | null>(null);
+  // Engine rebuilds follow the committed selection. A concurrent render may
+  // suspend or be abandoned without changing the track the user still sees.
+  useLayoutEffect(() => {
+    const selected = { trackId, intent: loadIntent, deck: DECK };
+    selectedLoad.current = selected;
+    return () => { if (selectedLoad.current === selected) selectedLoad.current = null; };
+  }, [trackId, loadIntent, DECK]);
   const targetLoad = useRef<HeldLoad | null>(held.get(DECK) ?? null);
   const readyLoad = useRef(0);
   const loadPending = useRef(false);
@@ -335,8 +339,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
 
   /** Starts a uniquely identified load; stale completions cannot satisfy it. */
   const beginLoad = useCallback((nextTrack: string, restore: boolean) => {
+    const selected = selectedLoad.current;
+    if (selected === null || selected.deck !== DECK || selected.trackId !== nextTrack) return;
     const previousOwner = confirmedLoads.get(DECK) ?? null;
-    const request = { trackId: nextTrack, loadId: allocateLoadId(), intent: selectedIntent.current };
+    const request = { trackId: nextTrack, loadId: allocateLoadId(), intent: selected.intent };
     publishOwner(null);
     targetLoad.current = request;
     held.set(DECK, request);
@@ -541,9 +547,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       });
       const unlistenReset = backend.onDeckReset?.(() => {
         if (!live) return;
-        const current = selectedTrack.current;
+        const selected = selectedLoad.current;
+        if (selected === null || selected.deck !== DECK) return;
         publishOwner(null);
-        if (current !== null) beginLoad(current, true);
+        if (selected.trackId !== null) beginLoad(selected.trackId, true);
       }) ?? (() => undefined);
       if (!live) {
         unlistenTick();
