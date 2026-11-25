@@ -600,6 +600,11 @@ pub(super) fn preview_overlap(
     if estimate.uncertain_adoption_bytes > 0 {
         return Ok((0, true));
     }
+    // No recorded audio means no existing relocation source to materialize.
+    // Keep first-export estimates out of placement/probe preparation entirely.
+    if previous.is_none_or(|manifest| manifest.tracks.is_empty()) {
+        return Ok((0, false));
+    }
     let previous_in_place = super::previous_in_place(destination, previous);
     let in_place = super::in_place_paths(destination, tracks, &previous_in_place);
     let adopted = vec![None; tracks.len()];
@@ -679,6 +684,71 @@ mod tests {
         OverlapSpace {
             allocated: bytes,
             temporary: bytes,
+        }
+    }
+
+    #[test]
+    fn a_preview_without_recorded_tracks_does_not_probe_or_prepare_audio() {
+        let temporary = tempfile::tempdir().unwrap();
+        let track = SourceTrack {
+            id: 1,
+            source_path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../rbl-audio/tests/fixtures/stereo-96k.flac"),
+            ..Default::default()
+        };
+        let empty = super::super::Manifest {
+            generation: None,
+            db_id: 123,
+            baseline: None,
+            version: super::super::manifest::MANIFEST_VERSION,
+            written: String::new(),
+            tracks: Vec::new(),
+            playlists: Vec::new(),
+            loose: Vec::new(),
+        };
+        for previous in [None, Some(&empty)] {
+            let cache_root = temporary.path().join("unneeded-cache");
+            let cache = cache::PreparationCache::new(cache_root.clone());
+            let options = super::super::ExportOptions {
+                compatibility: Some(CompatibilityFormat::Aiff),
+                cache: Some(&cache),
+                ..Default::default()
+            };
+            let mut estimate = super::super::estimate::Estimate::default();
+            assert_eq!(
+                preview_overlap(
+                    temporary.path(),
+                    std::slice::from_ref(&track),
+                    previous,
+                    "PIONEER",
+                    &estimate,
+                    &options,
+                    &BTreeSet::new(),
+                    4096
+                )
+                .unwrap(),
+                (0, false)
+            );
+            assert!(
+                !cache_root.exists(),
+                "without a recorded track no audio preparation/probe is needed"
+            );
+            estimate.uncertain_adoption_bytes = 1;
+            assert_eq!(
+                preview_overlap(
+                    temporary.path(),
+                    std::slice::from_ref(&track),
+                    previous,
+                    "PIONEER",
+                    &estimate,
+                    &options,
+                    &BTreeSet::new(),
+                    4096
+                )
+                .unwrap(),
+                (0, true)
+            );
+            assert!(!cache_root.exists());
         }
     }
 
