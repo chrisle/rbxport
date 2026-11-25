@@ -860,7 +860,8 @@ export interface TrackTableProps {
   /** Open a containing collection playlist in this browser. */
   onOpenPlaylist?: (playlist: string | null) => boolean;
   spec: ViewSpec;
-  onSortChange: (column: SortColumn) => void;
+  onSortChange: (column: SortColumn, summary?: boolean) => void;
+  summarySort?: boolean;
   /**
    * `picked`: the tracks were picked in this list since it was opened, so the
    * status bar says what is selected rather than the list's tally.
@@ -1133,8 +1134,15 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
   return `${row.id}#${String(slot)}`;
 }
 
+const SUMMARY_SORT_CHOICES = [
+  { action: "title", label: "Track Title" },
+  { action: "artist", label: "Artist" },
+  { action: "bpm", label: "BPM" },
+  { action: "key", label: "Key" },
+] as const;
+
 export const TrackTable = memo(function TrackTable({
-  loadedTracks = [], deckTrackIds = NO_DECKS, onShowCollection, onOpenPlaylist, spec, onSortChange, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
+  loadedTracks = [], deckTrackIds = NO_DECKS, onShowCollection, onOpenPlaylist, spec, onSortChange, summarySort = false, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns: layoutColumns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditColor, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
@@ -1226,6 +1234,9 @@ export const TrackTable = memo(function TrackTable({
   const rowsRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [dragKey, setDragKey] = useState<ColumnKey | null>(null);
+  const [summaryMenu, setSummaryMenu] = useState<{ x: number; y: number; source: string; mode: ArtworkMode } | null>(null);
+  const summarySource = JSON.stringify(spec.source);
+  useEffect(() => { setSummaryMenu(null); }, [summarySource, artworkMode]);
   const [menu, setMenu] = useState<{ x: number; y: number; target: ColumnKey } | null>(null);
   // Live during a header-edge drag. A ref, not state: this updates per
   // mousemove and re-rendering the table on each would be a frame's work.
@@ -2258,16 +2269,20 @@ export const TrackTable = memo(function TrackTable({
 
   // An arrow drawn to rekordbox's geometry rather than the text arrows that
   // stood in for it: those render in the body font and sit off the baseline.
+  const logicalSort = spec.sort === "keyCamelot" ? "key" : spec.sort;
+  const summaryChoice = SUMMARY_SORT_CHOICES.find(choice => choice.action === logicalSort);
+  const summaryOwnsVisibleSort = summarySort && summaryChoice !== undefined && columns.some(col => col.key === "summary");
+  const ownsSort = useCallback((col: Column) => summaryOwnsVisibleSort ? col.key === "summary" : col.sortable && col.key === logicalSort, [summaryOwnsVisibleSort, logicalSort]);
   const sortIndicator = useCallback(
     (col: Column) =>
-      col.sortable && col.key === spec.sort ? (
+      ownsSort(col) ? (
         spec.descending ? (
           <SortDownIcon className={styles.sortArrow} />
         ) : (
           <SortUpIcon className={styles.sortArrow} />
         )
       ) : null,
-    [spec.sort, spec.descending],
+    [ownsSort, spec.descending],
   );
 
   const dragged = dragKey === null ? undefined : columns.find((col) => col.key === dragKey);
@@ -2283,7 +2298,7 @@ export const TrackTable = memo(function TrackTable({
         <div
           key={col.key}
           className={col.align === "right" ? `${styles.headCell} ${styles.right}` : styles.headCell}
-          data-sorted={col.key === spec.sort || undefined}
+          data-sorted={ownsSort(col) || undefined}
           data-dragging={dragKey === col.key || undefined}
           onMouseDown={(e) => {
             // Reordering is a pointer drag with a threshold, not HTML5
@@ -2295,14 +2310,15 @@ export const TrackTable = memo(function TrackTable({
             reorder.current = { key: col.key, x: e.clientX, grab: e.clientX - box.left, moved: false };
           }}
           onClick={
-            col.sortable
-              ? () => {
+            col.sortable || col.key === "summary"
+              ? (event) => {
                   // A drag ends in a click too; that one must not also sort.
                   if (draggedRef.current) {
                     draggedRef.current = false;
                     return;
                   }
-                  onSortChange(col.key as SortColumn);
+                  if (col.key === "summary") setSummaryMenu({ x: event.clientX, y: event.clientY, source: summarySource, mode: artworkMode });
+                  else onSortChange(col.key as SortColumn);
                 }
               : undefined
           }
@@ -2312,7 +2328,7 @@ export const TrackTable = memo(function TrackTable({
           }}
           role="columnheader"
         >
-          {col.label}
+          {col.key === "summary" && summarySort && summaryChoice ? `${translate("Summary")} (${translate(summaryChoice.label)})` : col.label}
           {sortIndicator(col)}
           {/*
             The resize grip. Its own mousedown stops the header's click, so
@@ -2337,7 +2353,7 @@ export const TrackTable = memo(function TrackTable({
           />}
         </div>
       )),
-    [columns, spec.sort, onSortChange, sortIndicator, dragKey],
+    [columns, ownsSort, onSortChange, sortIndicator, dragKey, summarySort, summaryChoice, translate, summarySource, artworkMode],
   );
 
   return (
@@ -2599,6 +2615,15 @@ export const TrackTable = memo(function TrackTable({
         </div>
       </div>
 
+      {summaryMenu && summaryMenu.source === summarySource && summaryMenu.mode === artworkMode ? (
+        <ContextMenu
+          x={summaryMenu.x} y={summaryMenu.y} label="Summary"
+          rows={SUMMARY_SORT_CHOICES.map(({ action, label }) => ({ action, label: translate(label) }))}
+          context={{ inPlaylist: false, hasFile: false, readOnly: false }}
+          onChoose={(column) => onSortChange(column, true)}
+          onClose={() => setSummaryMenu(null)}
+        />
+      ) : null}
       {trackMenu && deviceMenu && spec.source.kind === "device" ? (
         <ContextMenu
           x={trackMenu.x}

@@ -187,3 +187,14 @@ it("drops cached OS date labels from a previous process but preserves the stored
   expect(restored.rows[0]?.dateAdded).toBe("2025-03-04");
   expect(restored.rows[0]?.dateLabels).toBeUndefined();
 });
+
+describe("Summary header restoration", () => {
+  it("keeps independent valid Summary ownership without inferring it for ordinary sorts", () => {
+    const main = { column: "artist", descending: true, summary: true };
+    const sub = { column: "key", descending: false, summary: true };
+    expect(sanitiseSession({ sort: main, subSummarySort: sub })).toMatchObject({ sort: main, subSummarySort: sub });
+    expect(sanitiseSession({ sort: { column: "artist" }, subSummarySort: { column: "key" } })).toMatchObject({ sort: { column: "artist", descending: false }, subSummarySort: null });
+    expect(sanitiseSession({ sort: { column: "comment", summary: true }, subSummarySort: { column: "trackNo", summary: true } })).toMatchObject({ sort: { column: "comment", descending: false }, subSummarySort: null });
+    expect(sanitiseSession({ subSummarySort: null }).subSummarySort).toBeNull();
+  });
+});

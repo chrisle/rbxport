@@ -13,6 +13,8 @@ import { relatedCriterionOf } from "./tree";
 export interface SortState {
   column: SortColumn;
   descending: boolean;
+  /** The Summary header owns this canonical column and direction. */
+  summary?: true;
 }
 
 /**
@@ -85,8 +87,9 @@ export function specForNode(
  * "Off" is the view's own order rather than another column's: a playlist that
  * could not be put back the way it was would make sorting it a one-way door.
  */
-export function nextSort(current: SortState, column: SortColumn): SortState {
-  if (current.column !== column) return { column, descending: false };
-  if (!current.descending) return { column, descending: true };
+export function nextSort(current: SortState, column: SortColumn, summary = false): SortState {
+  const owner = summary ? { summary: true as const } : {};
+  if (current.column !== column || (current.summary === true) !== summary) return { column, descending: false, ...owner };
+  if (!current.descending) return { column, descending: true, ...owner };
   return NO_SORT;
 }

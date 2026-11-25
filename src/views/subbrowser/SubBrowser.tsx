@@ -28,7 +28,7 @@
 import type { TrackSearchField } from "@/lib/search";
 import type { ArtworkMode } from "@/lib/session";
 
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
 import { usePreferences } from "@/store/usePreferences";
@@ -70,6 +70,8 @@ export type SubListProps = Pick<
 };
 
 export interface SubBrowserProps {
+  initialSummarySort?: SortState | null;
+  onSummarySortChange?: (sort: SortState | null) => void;
   nodes: readonly TreeNode[];
   /** Bumped when the library changes, so cached pages are dropped. */
   libraryGeneration: number;
@@ -182,7 +184,7 @@ function useSplitterDrag(width: number, sign: 1 | -1, onChange: (width: number) 
 
 export const SubBrowser = memo(function SubBrowser({
   nodes, libraryGeneration, width, treeWidth, onWidthChange, onTreeWidthChange, tree, list,
-  artworkMode = "partial", onArtworkMode,
+  artworkMode = "partial", onArtworkMode, initialSummarySort = null, onSummarySortChange,
 }: SubBrowserProps) {
   const self = useRef<HTMLElement>(null);
   // Its own selection, deliberately not shared with the main browser. Held as
@@ -196,7 +198,7 @@ export const SubBrowser = memo(function SubBrowser({
   const onSelect = useCallback((node: TreeNode) => setSelectedId(node.id), []);
   const [query, setQuery] = useState("");
   const [searchField, setSearchField] = useState<TrackSearchField>("all");
-  const [sort, setSort] = useState<SortState | null>(null);
+  const [sort, setSort] = useState<SortState | null>(initialSummarySort);
   const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
   // Kept here for its own Analyze Track, and told to the shell, whose
   // information panel follows whichever list was selected in last.
@@ -216,9 +218,10 @@ export const SubBrowser = memo(function SubBrowser({
     [selected, query, sort, keyDisplay, keySort, searchField],
   );
 
-  const onSortChange = useCallback((column: SortColumn) => {
-    setSort((current) => nextSort(current ?? DEFAULT_SORT, column));
+  const onSortChange = useCallback((column: SortColumn, summary = false) => {
+    setSort((current) => nextSort(current ?? DEFAULT_SORT, column, summary));
   }, []);
+  useEffect(() => { onSummarySortChange?.(sort?.summary ? sort : null); }, [sort, onSummarySortChange]);
   const removeFromPlaylist = useCallback(
     (ids: readonly string[]): Promise<boolean> =>
       spec.source.kind === "playlist" ? list.onRemoveTracksFromPlaylist(spec.source.id, ids) : Promise.resolve(false),
@@ -303,6 +306,7 @@ export const SubBrowser = memo(function SubBrowser({
         }}
         spec={spec}
         onSortChange={onSortChange}
+        summarySort={sort?.summary === true}
         title={selected?.name ?? "Collection"}
         query={query}
         searchField={searchField}

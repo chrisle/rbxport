@@ -98,3 +98,15 @@ describe("the Key column's sort order", () => {
     expect(specForNode(node, "", { column: "bpm", descending: false }, "alphanumeric", "musical").sort).toBe("bpm");
   });
 });
+
+describe("Summary sort ownership", () => {
+  it("cycles the same canonical column and transfers ownership ascending", () => {
+    const summary = nextSort(NO_SORT, "artist", true);
+    expect(summary).toEqual({ column: "artist", descending: false, summary: true });
+    expect(nextSort(summary, "artist", true)).toEqual({ column: "artist", descending: true, summary: true });
+    expect(nextSort(nextSort(summary, "artist", true), "artist", true)).toEqual(NO_SORT);
+    expect(nextSort(summary, "artist")).toEqual({ column: "artist", descending: false });
+    expect(nextSort({ column: "artist", descending: true }, "artist", true)).toEqual(summary);
+    expect(specForNode(null, "", nextSort(NO_SORT, "key", true), "classic", "musical").sort).toBe("keyCamelot");
+  });
+});

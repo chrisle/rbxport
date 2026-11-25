@@ -260,6 +260,7 @@ function AppBody() {
   // Opens in the view's own order: a playlist's is the order somebody put it
   // in, and the collection has no more meaningful default.
   const [sortState, setSortState] = useState<SortState>(restored.sort);
+  const [subSummarySort, setSubSummarySort] = useState(restored.subSummarySort ?? null);
   const [selectedCount, setSelectedCount] = useState(0);
   const [listTotals, setListTotals] = useState<ListTotals | undefined>(undefined);
   // Whether the tracks were picked in the list now open; see `TrackTable`.
@@ -980,8 +981,8 @@ function AppBody() {
     };
   }, [filterOpen, selectedNode, query, searchField, libraryGeneration, relatedTo, tagListKey]);
 
-  const handleSort = useCallback((column: SortColumn) => {
-    setSortState((s) => nextSort(s, column));
+  const handleSort = useCallback((column: SortColumn, summary = false) => {
+    setSortState((s) => nextSort(s, column, summary));
   }, []);
 
   useEffect(() => {
@@ -3238,6 +3239,7 @@ function AppBody() {
       selectedNodeId: selectedNode?.id ?? null,
       treeExpansion,
       sort: sortState,
+      subSummarySort,
       infoOpen,
       myTagOpen,
       subOpen,
@@ -3257,7 +3259,7 @@ function AppBody() {
       jumpSize,
       dualControl: dual,
     });
-  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, infoWidth, trafficLight, savedArtworkMode, waveformZoom, jumpSize, dual]);
+  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, subSummarySort, infoOpen, myTagOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, infoWidth, trafficLight, savedArtworkMode, waveformZoom, jumpSize, dual]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -3587,6 +3589,7 @@ function AppBody() {
           onShowCollection={showCollection}
           onOpenPlaylist={openContainingPlaylist}
           onSortChange={handleSort}
+          summarySort={sortState.summary === true}
           onSelectionChange={changeSelectedCount}
           onTotalsChange={setListTotals}
           onSelectedTracks={reportMainSelection}
@@ -3661,6 +3664,8 @@ function AppBody() {
         )}
         {subOpen ? (
           <SubBrowser
+            initialSummarySort={subSummarySort}
+            onSummarySortChange={setSubSummarySort}
             nodes={treeNodes}
             libraryGeneration={libraryGeneration}
             width={subWidth}

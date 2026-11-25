@@ -41,6 +41,8 @@ export interface Session {
   /** Folder open/closed choices that override the library's defaults. */
   treeExpansion: TreeExpansion;
   sort: SortState;
+  /** Only the sub-browser Summary sort is restored; its ordinary sorts remain local. */
+  subSummarySort?: SortState | null;
   infoOpen: boolean;
   /** The My Tag window, which shares the information window's place. */
   myTagOpen: boolean;
@@ -152,11 +154,13 @@ const SORT_COLUMNS: readonly string[] = Object.keys(SORTABLE);
 
 function sortOrDefault(value: unknown): SortState {
   if (typeof value !== "object" || value === null) return DEFAULT_SORT;
-  const raw = value as { column?: unknown; descending?: unknown };
+  const raw = value as { column?: unknown; descending?: unknown; summary?: unknown };
   if (typeof raw.column !== "string" || !SORT_COLUMNS.includes(raw.column)) {
     return DEFAULT_SORT;
   }
-  return { column: raw.column as SortColumn, descending: raw.descending === true };
+  return { column: raw.column as SortColumn, descending: raw.descending === true,
+    ...(raw.summary === true && ["title", "artist", "bpm", "key"].includes(raw.column) ? { summary: true as const } : {}),
+  };
 }
 
 /** A stored pane width, or the default when it is not a usable number. */
@@ -213,11 +217,13 @@ function treeExpansionOrDefault(value: unknown): TreeExpansion {
 export function sanitiseSession(value: unknown): Session {
   if (typeof value !== "object" || value === null) return DEFAULT_SESSION;
   const raw = value as Partial<Record<keyof Session, unknown>>;
+  const subSummarySort = sortOrDefault(raw.subSummarySort);
   return {
     treeWidth: widthOrDefault(raw.treeWidth, DEFAULT_TREE_WIDTH),
     selectedNodeId: typeof raw.selectedNodeId === "string" ? raw.selectedNodeId : null,
     treeExpansion: treeExpansionOrDefault(raw.treeExpansion),
     sort: sortOrDefault(raw.sort),
+    ...(raw.subSummarySort !== undefined ? { subSummarySort: subSummarySort.summary ? subSummarySort : null } : {}),
     infoOpen: raw.infoOpen === true,
     // One of the two at most: they share a place.
     myTagOpen: raw.myTagOpen === true && raw.infoOpen !== true,
