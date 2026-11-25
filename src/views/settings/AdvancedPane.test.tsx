@@ -265,6 +265,35 @@ describe("Database management", () => {
     expect(stop).toHaveBeenCalledOnce();
   });
 
+  it("refreshes drive choices on focus when the mount watcher emits nothing", async () => {
+    const share = { name: "Music", masterDb: "/mnt/music/PIONEER/Master/master.db", current: false };
+    const databaseDrives = vi.fn().mockResolvedValueOnce([local])
+      .mockResolvedValueOnce([local, share]).mockResolvedValueOnce([local]);
+    const switchLibrary = vi.fn();
+    const select = await mountDatabase({ databaseDrives, switchLibrary });
+    expect(select!.disabled).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect([...select!.options].map(option => option.value)).toEqual([local.masterDb, share.masterDb]);
+    expect(select!.value).toBe(local.masterDb);
+    expect(select!.disabled).toBe(false);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect([...select!.options].map(option => option.value)).toEqual([local.masterDb]);
+    expect(select!.disabled).toBe(true);
+    expect(switchLibrary).not.toHaveBeenCalled();
+
+    act(() => root.render(null));
+    act(() => { window.dispatchEvent(new Event("focus")); });
+    expect(databaseDrives).toHaveBeenCalledTimes(3);
+  });
+
   it.each([false, true])("ignores older drive scans and replies after the pane is disposed (failure=%s)", async (failure) => {
     let changed = () => {};
     let old = () => {};

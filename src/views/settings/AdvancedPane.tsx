@@ -318,7 +318,13 @@ function DatabaseManagementSection({ readOnly }: { readOnly: boolean }) {
           .then((found) => { if (live && request === scan.current) setDrives(found); })
           .catch(() => { if (live && request === scan.current) setDrives([]); });
       };
-      stop = backend.onDevicesChanged(refresh);
+      const stopDevices = backend.onDevicesChanged(refresh);
+      // Library discovery can see network mounts that the device watcher skips.
+      window.addEventListener("focus", refresh);
+      stop = () => {
+        window.removeEventListener("focus", refresh);
+        stopDevices();
+      };
       refresh();
     }).catch(() => {});
     return () => { live = false; stop?.(); };
