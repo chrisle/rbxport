@@ -3265,7 +3265,7 @@ function AppBody() {
     values={filterValues} masterBpmX100={masterBpmX100} owner={spec.source.kind === "device" ? spec.source : undefined} />, [filterState, filterValues, masterBpmX100, spec.source]);
   const subTree = useMemo(() => ({
     dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
-    canDropToDevicePlaylists: draggedTracks?.sourceKind !== "device", onDropDeviceTracks: addDraggedToDevice,
+    canDropToDevicePlaylists: Boolean(draggedTracks), onDropDeviceTracks: addDraggedToDevice,
     draggingToDevice: draggedTracks !== null && !hasLooseId(draggedTracks.ids), onDropTracksOnDevice: exportDraggedTo,
     onImportFolderPlaylist: importExplorerFolder,
     onDropFiles: readOnly ? undefined : importDroppedFilesTo,
