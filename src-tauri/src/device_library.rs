@@ -111,6 +111,15 @@ impl DeviceAssets {
         Self::on_stick(&self.mount, &self.analysis)
     }
 
+    /// A waveform's selected companion, resolved with the stick's filename
+    /// spelling. Keep the DAT prerequisite even for EXT and 2EX palettes.
+    pub(crate) fn waveform_file(&self, extension: Option<&str>) -> Option<PathBuf> {
+        let dat = self.analysis_dat()?;
+        let Some(extension) = extension else { return Some(dat) };
+        let sibling = rbl_anlz::sibling(&dat, extension);
+        Self::on_stick(&self.mount, sibling.strip_prefix(&self.mount).ok()?.to_str()?)
+    }
+
     /// The track's artwork on the stick, under the same rule.
     pub fn artwork_file(&self) -> Option<PathBuf> {
         Self::on_stick(&self.mount, &self.artwork)
@@ -2813,7 +2822,8 @@ mod tests {
             state.remember_device_assets(mount, library.tracks.iter().map(|t| assets_of(mount, format, t)));
             let row = row_dto(&device_row(mount, &library.tracks[0], 0));
             assert_eq!(row.analysed, 1, "{format:?}: the deck draws only an analysed row's waveform");
-            let dat = state.device_assets(&row.id).unwrap().analysis_dat().unwrap();
+            let assets = state.device_assets(&row.id).unwrap();
+            let dat = assets.analysis_dat().unwrap();
             // Each palette's pair, as `waveformKindOf` names them.
             for (kind, want) in [
                 ("bands", &pwv6),
@@ -2824,7 +2834,51 @@ mod tests {
                 ("monoDetail", &pwv3),
             ] {
                 assert_eq!(&crate::commands::waveform_of(&dat, kind, None, None), want, "{format:?} {kind}");
+                assert_eq!(&crate::commands::device_waveform_of(&assets, kind, None, None), want, "{format:?} {kind}");
             }
+            for (extension, mixed, kinds) in [
+                ("EXT", "eXt", vec![("colour", &device_pwv4, 6), ("colourDetail", &pwv5, 2), ("monoDetail", &pwv3, 1)]),
+                ("2EX", "2eX", vec![("bands", &pwv6, 3), ("bandsDetail", &pwv7, 3)]),
+            ] {
+                let exact = dat.with_extension(extension);
+                let variant = dat.with_extension(mixed);
+                let held = dat.with_extension("held");
+                // Two-step rename also changes spelling on case-insensitive hosts.
+                std::fs::rename(&exact, &held).unwrap();
+                std::fs::rename(&held, &variant).unwrap();
+                let case_sensitive = !exact.exists();
+                for (kind, want, stride) in &kinds {
+                    assert_eq!(&crate::commands::device_waveform_of(&assets, kind, None, None), *want, "{format:?} mixed {kind}");
+                    assert_eq!(&crate::commands::device_waveform_of(&assets, kind, Some(2), Some(3)), &want[2 * stride..5 * stride], "{format:?} window {kind}");
+                    if case_sensitive {
+                        assert!(crate::commands::waveform_of(&dat, kind, None, None).is_empty(), "unchanged collection route stays exact-spelled");
+                    }
+                }
+                if case_sensitive {
+                    let second = dat.with_extension(extension.to_lowercase());
+                    std::fs::copy(&variant, &second).unwrap();
+                    for (kind, _, _) in &kinds {
+                        assert!(crate::commands::device_waveform_of(&assets, kind, None, None).is_empty(), "ambiguous {kind}");
+                    }
+                    // An exact name is authoritative even beside ambiguous variants.
+                    std::fs::write(&exact, rbl_anlz::AnlzBuilder::new().path("/empty").finish()).unwrap();
+                    for (kind, _, _) in &kinds {
+                        assert!(crate::commands::device_waveform_of(&assets, kind, None, None).is_empty(), "exact empty {kind} must not fall back");
+                    }
+                    std::fs::remove_file(&exact).unwrap();
+                    std::fs::remove_file(&second).unwrap();
+                }
+                std::fs::rename(&variant, &held).unwrap();
+                for (kind, _, _) in &kinds {
+                    assert!(crate::commands::device_waveform_of(&assets, kind, None, None).is_empty(), "missing {kind}");
+                }
+                assert_eq!(crate::commands::device_waveform_of(&assets, "mono", None, None), pwav, "missing companion preserves DAT preview");
+                std::fs::rename(&held, &exact).unwrap();
+            }
+            let held_dat = dat.with_extension("held-dat");
+            std::fs::rename(&dat, &held_dat).unwrap();
+            assert!(crate::commands::device_waveform_of(&assets, "colour", None, None).is_empty(), "DAT remains required");
+            std::fs::rename(&held_dat, &dat).unwrap();
         }
     }
 

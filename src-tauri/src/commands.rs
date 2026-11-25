@@ -483,8 +483,7 @@ pub async fn track_waveform(
     // A stick's own track, from the Devices tree: its analysis is on the
     // stick, not in the library (#319).
     if let Some(assets) = state.device_assets(&track_id) {
-        let dat = assets.analysis_dat();
-        return blocking("track_waveform", move || Ok(dat.map(|dat| waveform_of(&dat, &kind, from, len)).unwrap_or_default()))
+        return blocking("track_waveform", move || Ok(device_waveform_of(&assets, &kind, from, len)))
             .await
             .map(tauri::ipc::Response::new);
     }
@@ -583,11 +582,20 @@ pub(crate) fn waveform_of(dat: &std::path::Path, kind: &str, from: Option<u32>, 
     let (sibling, tag, stride) = waveform_layout(kind);
     let file = sibling.map_or_else(|| dat.to_path_buf(), |ext| rbl_anlz::sibling(dat, ext));
 
-    let Ok(anlz) = rbl_anlz::Anlz::read(&file) else {
+    waveform_file(&file, &tag, stride, from, len)
+}
+
+pub(crate) fn device_waveform_of(assets: &crate::device_library::DeviceAssets, kind: &str, from: Option<u32>, len: Option<u32>) -> Vec<u8> {
+    let (extension, tag, stride) = waveform_layout(kind);
+    assets.waveform_file(extension).map(|file| waveform_file(&file, &tag, stride, from, len)).unwrap_or_default()
+}
+
+fn waveform_file(file: &std::path::Path, tag: &[u8; 4], stride: usize, from: Option<u32>, len: Option<u32>) -> Vec<u8> {
+    let Ok(anlz) = rbl_anlz::Anlz::read(file) else {
         // Analysis missing on disk: draw nothing rather than fail the view.
         return Vec::new();
     };
-    let whole = anlz.waveform(&tag).map(|(_, data)| data).unwrap_or_default();
+    let whole = anlz.waveform(tag).map(|(_, data)| data).unwrap_or_default();
     window_of(whole, stride, from, len)
 }
 
