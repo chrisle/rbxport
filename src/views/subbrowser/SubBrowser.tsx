@@ -293,6 +293,13 @@ export const SubBrowser = memo(function SubBrowser({
         aria-valuenow={treeShown}
       />
       <TrackTable
+        onOpenPlaylist={id => {
+          const node = id === null ? nodes.find(item => item.kind === "allTracks") ?? nodes.find(item => item.kind === "collection")
+            : nodes.find(item => item.id === id && (item.kind === "playlist" || item.kind === "smartPlaylist"));
+          if (!node) return false;
+          setSelectedId(node.id);
+          return true;
+        }}
         spec={spec}
         onSortChange={onSortChange}
         title={selected?.name ?? "Collection"}

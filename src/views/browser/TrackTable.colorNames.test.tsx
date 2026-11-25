@@ -64,6 +64,7 @@ it("shows literal master labels in German and switches to each selected device d
 it("does not replace another pane's selection when an empty browser first mounts", async () => {
   render({ kind: "collection" }); await settle(); await settle();
   expect(report).not.toHaveBeenCalled();
+  expect(reportRow).not.toHaveBeenCalled();
 });
 
 it("refreshes a selected row when another database returns the same file ID", async () => {

@@ -8,6 +8,8 @@ import type { LoadedTrack } from "@/ipc/types";
  * instead of rewriting every cell.
  */
 import { dragTracksToDesktop, getBackend, nativeTrackDragging } from "@/ipc/client";
+import { PlaylistPath } from "./PlaylistPath";
+import { reportPlaylistError } from "@/store/useTrackPlaylists";
 import { SearchField } from "@/components/SearchField";
 import { reportStartupPaint } from "@/lib/startup";
 import { useEventCallback } from "@/store/useEventCallback";
@@ -853,6 +855,8 @@ export interface TrackTableProps {
   loadedTracks?: readonly (LoadedTrack | null)[];
   /** Opens All Tracks, where Locate looks for a track the open list lacks. */
   onShowCollection?: () => void;
+  /** Open a containing collection playlist in this browser. */
+  onOpenPlaylist?: (playlist: string | null) => boolean;
   spec: ViewSpec;
   onSortChange: (column: SortColumn) => void;
   /**
@@ -1128,7 +1132,7 @@ function rowKey(row: RowDto | undefined, slot: number | string | bigint, keyed: 
 }
 
 export const TrackTable = memo(function TrackTable({
-  loadedTracks = [], deckTrackIds = NO_DECKS, onShowCollection, spec, onSortChange, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
+  loadedTracks = [], deckTrackIds = NO_DECKS, onShowCollection, onOpenPlaylist, spec, onSortChange, onSelectionChange, onTotalsChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns: layoutColumns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onRenumber, subBrowser = false, onEditField, onEditColor, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, pendingRows = 0, onSelectedTracks, onAnalyse,
@@ -1143,6 +1147,7 @@ export const TrackTable = memo(function TrackTable({
   // virtualizer has to be told the same height the CSS draws. The whole
   // artwork doubles it.
   const preferences = usePreferences();
+  const translate = useTranslation();
   const rowH = rowHeightForArtworkMode(
     Math.round(ROW_H * browseScale(preferences.view.browseLineSpace)),
     artworkMode,
@@ -1454,10 +1459,10 @@ export const TrackTable = memo(function TrackTable({
   // only when it is not wholly on screen (rekordbox's `browseCenterAt`).
   // Resolves false when the list does not have it.
   const locateHere = useCallback(
-    async (id: string): Promise<boolean> => {
+    async (id: string, current: () => boolean = () => true): Promise<boolean> => {
       if (view.count === 0) return false;
       const index = (await view.idsInRange(0, view.count)).indexOf(id);
-      if (index < 0) return false;
+      if (index < 0 || !current()) return false;
       const el = scrollRef.current;
       if (el && needsCentering(COL_HEADER_H + index * rowH, rowH, el.scrollTop, el.clientHeight, COL_HEADER_H)) {
         virtualizer.scrollToIndex(index, { align: "center" });
@@ -1511,6 +1516,26 @@ export const TrackTable = memo(function TrackTable({
     if (!answersLocate) return;
     return registerLocateLoaded(locateLoaded);
   }, [answersLocate, locateLoaded]);
+  const [playlistLocate, setPlaylistLocate] = useState<{ playlist: string | null; track: string; generation: number } | null>(null);
+  const latestSelection = useRef(selection.ids);
+  useLayoutEffect(() => { latestSelection.current = selection.ids; }, [selection.ids]);
+  const restorePlaylistTrack = useEventCallback((id: string, current: () => boolean) => locateHere(id, current));
+  useEffect(() => {
+    if (!playlistLocate) return;
+    if ((libraryGeneration ?? 0) !== playlistLocate.generation) { setPlaylistLocate(null); return; }
+    if (playlistLocate.playlist === null ? spec.source.kind !== "collection"
+      : spec.source.kind !== "playlist" || spec.source.id !== playlistLocate.playlist) {
+      setPlaylistLocate(null);
+      return;
+    }
+    if (view.loading) return;
+    let live = true;
+    const requestedSelection = latestSelection.current;
+    void restorePlaylistTrack(playlistLocate.track, () => live && latestSelection.current === requestedSelection)
+      .catch(error => { if (live) reportPlaylistError(error); })
+      .finally(() => { if (live) setPlaylistLocate(null); });
+    return () => { live = false; };
+  }, [playlistLocate, libraryGeneration, spec.source, view.sourceKey, view.loading, view.token, restorePlaylistTrack]);
   // All Tracks has opened for a track the list before it lacked.
   useEffect(() => {
     if (view.loading) return;
@@ -1881,8 +1906,10 @@ export const TrackTable = memo(function TrackTable({
   }, [onlySelected, recheckMissing, spec.source.kind]);
 
   const reportedRow = useRef<RowDto | null>(null);
+  const reportedSource = useRef("");
+  const [pathSelection, setPathSelection] = useState<{ source: string; id: string } | null>(null);
   useEffect(() => {
-    if (!onSelectedRow) return;
+    if (!onSelectedRow && !onOpenPlaylist) return;
     // Keep the actual cached row, including its source and colour ID. A
     // different database can return the same file ID with different data.
     const only = selection.ids.size === 1 ? [...selection.ids][0] : undefined;
@@ -1896,10 +1923,12 @@ export const TrackTable = memo(function TrackTable({
         }
       }
     }
-    if (selected === reportedRow.current) return;
+    if (selected === reportedRow.current && (selected === null || reportedSource.current === view.sourceKey)) return;
     reportedRow.current = selected;
-    onSelectedRow(selected);
-  }, [selection.ids, view, view.token, onSelectedRow]);
+    reportedSource.current = view.sourceKey;
+    if (onOpenPlaylist) setPathSelection(selected ? { source: view.sourceKey, id: selected.id } : null);
+    onSelectedRow?.(selected);
+  }, [selection.ids, view, view.token, onSelectedRow, onOpenPlaylist]);
 
   // The rows behind the selection, resolved from what is cached. A selection
   // spanning unfetched rows contributes only what is on hand, which is what
@@ -2338,13 +2367,14 @@ export const TrackTable = memo(function TrackTable({
     >
       <div className={styles.browserHead}>
         <span className={styles.title} data-testid="browser-title">
-          {/*
-            The count belongs to the list, so it appears only once the list
-            has settled. While a view is opening, `view.count` is still the
-            previous view's, and pairing it with the new title showed a
-            playlist's name beside the whole collection's count.
-          */}
-          {view.loading ? title : `${title} (${view.count} Tracks)`}
+          {onOpenPlaylist ? <PlaylistPath
+            caption={view.loading ? title : `${spec.source.kind === "collection" || spec.source.kind === "tagList" ? translate(title) : title} (${view.count} ${translate("Tracks")})`}
+            track={selection.ids.size === 1 && pathSelection !== null && selection.ids.has(pathSelection.id) && !view.loading && pathSelection.source === view.sourceKey && spec.source.kind !== "device" && /^\d+$/.test(pathSelection.id) ? pathSelection.id : null}
+            owner={`${libraryGeneration}:${view.sourceKey}`}
+            onChoose={(playlist, track) => {
+              if (onOpenPlaylist(playlist)) setPlaylistLocate({ playlist, track, generation: libraryGeneration ?? 0 });
+            }}
+          /> : <>{view.loading ? title : `${title} (${view.count} Tracks)`}</>}
         </span>
         {trafficLight && onTrafficLight ? (
           <div ref={trafficBox} className={styles.trafficBox}>

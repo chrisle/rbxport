@@ -1,3 +1,4 @@
+import { useTrackPlaylists } from "@/store/useTrackPlaylists";
 /**
  * The track information panel.
  *
@@ -91,31 +92,15 @@ const LOCKED: Record<string, string> = {
 
 const READ_ONLY_REASON = "The library is read-only. Check Library Protection in Preferences, and quit rekordbox to edit";
 
+const NO_PLAYLISTS: RelatedPlaylist[] = [];
+
 export function InfoPanel({
   track, selection, readOnly, libraryGeneration, onRate, onComment, onEdit, onOpenPlaylist, selectionOwner,
 }: InfoPanelProps) {
   const [tab, setTab] = useState<InfoTab>("summary");
   const [details, setDetails] = useState<TrackDetails | null>(null);
   const [lookups, setLookups] = useState<TrackLookups | null>(null);
-  const [relatedPlaylists, setRelatedPlaylists] = useState<RelatedPlaylist[]>([]);
-  useEffect(() => {
-    if (!track || selection.length > 1) {
-      setRelatedPlaylists([]);
-      return;
-    }
-    let live = true;
-    void getBackend()
-      .then((b) => b.trackPlaylists(track.id))
-      .then((list) => { if (live) setRelatedPlaylists(list); })
-      .catch((e) => {
-        if (!live) return;
-        setRelatedPlaylists([]);
-        const message = e instanceof Error ? e.message : "Could not read the track's playlists";
-        // A read failure is not silent: it says so where every error goes.
-        void getBackend().then((b) => b.logStatusMessage(true, message)).catch(() => {});
-      });
-    return () => { live = false; };
-  }, [track, selection.length, libraryGeneration]);
+  const relatedPlaylists = useTrackPlaylists(track && selection.length <= 1 ? track.id : null, String(libraryGeneration)) ?? NO_PLAYLISTS;
 
   const multiple = selection.length > 1;
   // rekordbox greys Summary for several tracks and moves to Info, and stays
