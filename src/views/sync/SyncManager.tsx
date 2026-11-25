@@ -1072,7 +1072,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
             aria-busy={busy || undefined}
             aria-describedby="sync-selection-hint"
           >
-            {operation === "sync" || operation === "sync-refresh" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> {t(operation === "sync-refresh" ? "Refreshing…" : "Syncing…")}</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
+            {operation === "sync" || operation === "sync-refresh" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> {operation === "sync-refresh" ? t("Refreshing…") : "Syncing…"}</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
           </button>
           <button type="button" className={`${styles.button} ${styles.actionPreferences}`} onClick={() => openUsbExportPreferences("usbExportSync")}
             aria-label={t("Change sync preferences")} title={t("Change sync preferences")}>
