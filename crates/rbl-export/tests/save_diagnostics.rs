@@ -4,6 +4,10 @@ use rbl_export::{ExportOptions, SourcePlaylist, SourceTrack, SyncSource};
 use std::collections::BTreeMap;
 
 type Fields = BTreeMap<String, String>;
+// Scoped tracing subscribers share process-wide callsite interest. Serialize
+// entire fixtures, including their uncaptured initial exports, so another test
+// cannot first register a save callsite without this test's subscriber.
+static FIXTURE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 // Same fmt capture as the snapshot-read diagnostics (#950).
 fn capture<T>(action: impl FnOnce() -> T) -> (T, String) {
     let log = tempfile::NamedTempFile::new().unwrap();
@@ -112,6 +116,7 @@ fn assert_fixed_fields(records: &[Fields]) {
 }
 #[test]
 fn successful_export_records_fixed_save_subphases_without_paths_and_repeat_does_not() {
+    let _fixture = FIXTURE.lock().unwrap();
     let source = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let track = fixture(source.path());
@@ -127,7 +132,7 @@ fn successful_export_records_fixed_save_subphases_without_paths_and_repeat_does_
     assert_eq!(
         records.len(),
         10,
-        "one begin/end pair for each save subphase"
+        "one begin/end pair for each save subphase: {records:?}"
     );
     let expected_phases = [
         "staged_verify",
@@ -152,6 +157,7 @@ fn successful_export_records_fixed_save_subphases_without_paths_and_repeat_does_
 }
 #[test]
 fn publication_failure_records_only_fixed_fields_and_preserves_the_old_generation() {
+    let _fixture = FIXTURE.lock().unwrap();
     let source = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let mut track = fixture(source.path());
@@ -193,13 +199,14 @@ fn publication_failure_records_only_fixed_fields_and_preserves_the_old_generatio
     }
     assert!(rbl_export::verify(usb.path()).unwrap().is_ok());
     let records = phases(&log);
-    assert_eq!(records.len(), 4);
+    assert_eq!(records.len(), 4, "{records:?}");
     assert_eq!(records[3]["phase"], "publication");
     assert_eq!(records[3]["ok"], "false");
     assert_fixed_fields(&records);
 }
 #[test]
 fn published_verification_failure_is_logged_before_unchanged_rollback() {
+    let _fixture = FIXTURE.lock().unwrap();
     let source = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let mut track = fixture(source.path());
@@ -253,7 +260,7 @@ fn published_verification_failure_is_logged_before_unchanged_rollback() {
     }
     assert!(rbl_export::verify(usb.path()).unwrap().is_ok());
     let records = phases(&log);
-    assert_eq!(records.len(), 6);
+    assert_eq!(records.len(), 6, "{records:?}");
     assert_eq!(records[3]["ok"], "true");
     assert_eq!(records[5]["phase"], "published_verify");
     assert_eq!(records[5]["ok"], "false");
