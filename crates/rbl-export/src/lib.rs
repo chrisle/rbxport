@@ -1425,16 +1425,32 @@ fn export_cancellable_inner(
     // Audio a carried track names that was already missing from the stick
     // before this export: the databases keep naming it, as they did.
     let mut absent_audio: BTreeSet<String> = BTreeSet::new();
-    let mut written_audio_paths = BTreeSet::new();
-    // A carried track holds its directory's slot, not the whole directory: a
-    // carried track in rekordbox's `ANLZ0001` leaves `ANLZ0000` there to the
-    // selected track whose path hashes to it, which keeps its path and
-    // analysis rather than being copied again under a new name (#599).
-    let mut written_analysis_paths: BTreeSet<String> = tracks.iter().zip(&layouts)
-        .filter(|(t, _)| t.device.as_ref().is_some_and(|d| d.preserve))
-        .map(|(_, place)| analysis_slot_key(&place.anlz_dir, &place.anlz_name))
-        .collect();
-    for (index, track) in tracks.iter().enumerate() {
+    let audio_plan = prepared_audio::batch(destination, tracks, &ids, layouts, previous.as_ref(), root_name,
+        &in_place_paths, &adopted_paths, compatibility, cache, &source_contents_unchanged, &inspected_source_hashes,
+        cancelled, &mut |index, track| {
+            publication.check_root()?;
+            progress(&ExportProgress { stage: "planning", done: index, total: tracks.len(), title: track.title.clone(), unit: "tracks", ..Default::default() });
+            Ok(())
+        }, false)?;
+    publication.check_root()?;
+    if cancelled() { return Err(ExportError::Cancelled); }
+    // Copies accepted outside a trusted generation keep their observed stamp
+    // bound across upfront preparation, including a relocation's original.
+    let mut inspected_copies = Vec::new();
+    for entry in &audio_plan {
+        if let Ok(prepared_audio::AudioPreparation::Ready(audio)) = entry {
+            let moved_from = stale.get(&audio.key).map_or("", |old| old.audio.as_str());
+            for (path, stamp) in [(audio.placement.place.audio.as_str(), audio.inspected_copy_stamp), (moved_from, audio.moved_copy_stamp)] {
+                if let Some(stamp) = stamp.filter(|_| !trusted.contains(path.trim_start_matches('/'))) {
+                    inspected_copies.push((path.to_owned(), stamp));
+                }
+            }
+        }
+    }
+    let overlap_space = prepared_audio::overlap_space(destination, previous.as_ref(), &audio_plan, &trusted, plan::allocation_unit(destination))?;
+    prepared_audio::preflight(&audio_plan, plan.peak_bytes, plan.overlap_bytes, overlap_space, plan.unknown_size,
+        || fs2::available_space(destination))?;
+    for (index, (track, audio)) in tracks.iter().zip(audio_plan).enumerate() {
         // Reported before the track is dealt with, so a skip reports too:
         // whatever happens below, the count moves on by one.
         publication.check_root()?;
@@ -1449,39 +1465,20 @@ fn export_cancellable_inner(
             report.warnings.push(ExportWarning { track_id: track.id, title: track.title.clone(), reason: if track.retained_reason.is_some() { "update-failed" } else { "source-unavailable" }.into(), detail: track.retained_reason.clone() });
         }
         let export_id = ids.get(index).copied().unwrap_or(0);
-        let place = layouts[index].clone();
         let source = track.source_path.to_string_lossy().into_owned();
         let key = track_key(track.id, &source);
-
-        let prepared_audio::PreparedAudio { place, size, modified, absent, conversion } = match prepared_audio::prepare(
-            track, export_id, place, stale.get(&key).copied(), root_name, compatibility, cache,
-            &mut written_analysis_paths, &mut written_audio_paths,
-        )? {
+        let prepared_audio::ReadyAudio { placement: prepared_audio::PreparedAudio { place, size, modified, absent, conversion },
+            in_place, adopted, retained_audio, moved, source_receipt_matches, copy_now, source_hash,
+            existing_audio_hash, unchanged, .. } = match audio? {
             prepared_audio::AudioPreparation::Missing => { report.skipped.push(track.title.clone()); continue; }
             prepared_audio::AudioPreparation::Failed(error) => { fail_track(&mut report, track, &error); continue; }
             prepared_audio::AudioPreparation::Ready(ready) => ready,
         };
         let preserved = track.device.as_ref().is_some_and(|d| d.preserve);
-        // Still the library's own file on the stick, not renamed for a
-        // conversion or an analysis collision: point at it, copy nothing.
-        let in_place = absent || in_place_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
         if absent { absent_audio.insert(path_key(&place.audio)); }
-        // The stick's own copy, still where its row says and not renamed for
-        // a conversion or an analysis collision: kept, nothing copied.
-        let adopted = !in_place && adopted_paths.get(index).and_then(Option::as_deref) == Some(place.audio.as_str());
         let profile = conversion.map_or("", rbl_audio::compatibility::Format::profile);
         let audio_dest = under(destination, &place.audio);
-        let retained_audio = preserved && same_file(&track.source_path, &audio_dest);
-        // Looked at, not yet claimed: a track that fails below must leave
-        // its entry in `stale`.
-        let previous_entry = stale.get(&key).copied();
-        let source_receipt_matches = previous.as_ref().and_then(|m| m.generation.as_ref()).is_none_or(|g| {
-            g.inputs.get(&source).is_none_or(|old| incremental::revision(&track.source_path).is_ok_and(|now| now == *old))
-        });
-        let moved = previous_entry.filter(|c| c.audio != place.audio && c.size == size && c.conversion == profile
-            && ((c.modified == modified && source_receipt_matches) || source_contents_unchanged.contains(&key))
-            && !owns_library_file(destination, c) && !audio_dest.exists()
-            && copy_stamp(&under(destination, &c.audio)).is_ok_and(|now| same_copy(c.copy_stamp, now)));
+        let moved = stale.get(&key).copied().filter(|_| moved);
         if let Some(old) = moved {
             let from = PathBuf::from(old.audio.trim_start_matches('/'));
             let to = PathBuf::from(place.audio.trim_start_matches('/'));
@@ -1489,67 +1486,8 @@ fn export_cancellable_inner(
             relocated_sources.insert(from.to_string_lossy().into_owned());
             moved_audio.push(to);
         }
-        // Unchanged means: same source bytes by size and time, same place on
-        // the stick, and still actually there.
-        let unchanged_metadata = !in_place && previous_entry.is_some_and(|c| {
-            (c.audio == place.audio || (!c.in_place && c.preserved != Some(true) && c.conversion.is_empty()
-                && historical_audio_alias(destination, &c.audio).is_some_and(|portable| portable == place.audio)))
-                && c.size == size && c.conversion == profile
-                && ((c.modified == modified && source_receipt_matches) || source_contents_unchanged.contains(&key))
-        });
-        // The stick's copy as it is now, by size and time only.
-        let copy_now = if unchanged_metadata { copy_stamp(&audio_dest)? } else { None };
-        // The copy is still the one this export recorded: nothing has
-        // written to it since, so the bytes `audio_hash` names are the bytes
-        // there. Trusting that, as rekordbox trusts its device database for
-        // a track already exported, saves reading the whole stick back.
-        let copy_unchanged = previous_entry.is_some_and(|c| c.audio_hash != 0 && same_copy(c.copy_stamp, copy_now));
-        let source_hash = if let Some(c) = previous_entry.filter(|_| conversion.is_some() && copy_unchanged) {
-            c.conversion_source_hash
-        } else if conversion.is_some() {
-            match inspected_source_hashes.get(&key).map_or_else(|| cache.map_or_else(|| file_hash_cancellable(&track.source_path, cancelled), |cache| cache.source_hash(&track.source_path, cancelled).map_err(std::io::Error::other)), |hash| Ok(*hash)) {
-                Ok(hash) => hash,
-                Err(e) if is_device_gone(&e) => return Err(ExportError::DeviceGone),
-                Err(e) if e.kind() == std::io::ErrorKind::StorageFull => return Err(e.into()),
-                Err(e) => {
-                    fail_track(&mut report, track, &format!("Could not read the audio: {e}"));
-                    continue;
-                }
-            }
-        } else { 0 };
         let carried = stale.remove(&key);
-        // A track kept without its audio writes nothing, so adds nothing;
-        // nor does one whose copy the stick already holds.
         if carried.is_none() && !absent && !adopted { report.tracks_added += 1; }
-        // Otherwise the copy was written since this export recorded it, or
-        // the record predates `copy_stamp`. Hash the USB copy once against
-        // the recorded hash and the source: a same-size rewrite on the stick
-        // is caught here, and the copy's new stamp is recorded so the next
-        // sync can trust it again.
-        let existing_audio_hash = if copy_unchanged {
-            carried.map(|c| c.audio_hash)
-        } else if unchanged_metadata {
-            match carried.filter(|c| c.audio_hash != 0) {
-                Some(_) => match file_hash_cancellable(&audio_dest, cancelled) {
-                    Ok(hash) => Some(hash),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                    Err(e) => return Err(e.into()),
-                },
-                None => None,
-            }
-        } else { None };
-        let current_source_hash = if unchanged_metadata && !copy_unchanged && conversion.is_none() {
-            Some(inspected_source_hashes.get(&key).copied().map_or_else(|| file_hash_cancellable(&track.source_path, cancelled), Ok)?)
-        } else { None };
-        let unchanged = unchanged_metadata && if let Some(c) = carried {
-            if copy_unchanged { true }
-            else if conversion.is_some() && c.conversion_source_hash != source_hash { false }
-            else if c.audio_hash != 0 {
-                existing_audio_hash == Some(c.audio_hash)
-                    && (conversion.is_some() || current_source_hash == existing_audio_hash)
-            }
-            else { files_equal(&track.source_path, &audio_dest)? }
-        } else { false };
 
         let output_size;
         let copied_hash = std::cell::Cell::new(None);
@@ -2229,6 +2167,11 @@ fn export_cancellable_inner(
     incremental::recheck();
     for (path, expected) in &full_source_hashes {
         if file_hash_cancellable(path, cancelled)? != *expected { return Err(ExportError::Conflict("Source changed while it was being prepared".into())); }
+    }
+    for (path, expected) in &inspected_copies {
+        if copy_stamp(&under(destination, path))? != Some(*expected) {
+            return Err(ExportError::Conflict("Exported media changed during sync. Retry after closing other writers.".into()));
+        }
     }
     let trusted_after = incremental::trusted_paths(destination, previous.as_ref())?;
     if !trusted.is_subset(&trusted_after) {

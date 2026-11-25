@@ -1172,6 +1172,7 @@ impl<'a> RelocationPaths<'a> {
     /// Observe existing staged images when available. Before staging, the
     /// caller supplies the complete planned publication names to `new`.
     pub fn overlaps(&self, root: &Path, stage: Option<&Path>, from: &Path) -> std::io::Result<bool> {
+        validate_paths(&[from.to_path_buf()])?;
         let candidates = self.named.get(&Self::alias_key(from));
         if candidates.is_some_and(|paths| paths.contains(&from))
             || stage.map(|stage| stage.join(from).try_exists()).transpose()?.unwrap_or(false) {

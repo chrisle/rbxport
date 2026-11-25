@@ -10,6 +10,8 @@ pub struct SyncPlan {
     pub database_bytes: u64,
     pub asset_bytes: u64,
     pub peak_bytes: u64,
+    /// Temporary staging of relocations whose source is replaced by this sync.
+    pub overlap_bytes: u64,
     pub net_additional_bytes: i64,
     pub approximate: bool,
     pub unknown_size: bool,
@@ -34,7 +36,7 @@ pub fn preview(destination: &Path, tracks: &[SourceTrack], playlists: &[SourcePl
     }) && options.settings_files.is_empty()) {
         return Ok(SyncPlan { tracks: tracks.to_vec(), playlists: playlists.to_vec(),
             estimate: crate::estimate::Estimate { tracks_kept: manifest.tracks.len(), reuse_bytes: manifest.tracks.iter().map(|t| t.copy_stamp.map_or(t.size, |s| s.0)).sum(), ..Default::default() },
-            database_bytes: 0, asset_bytes: 0, peak_bytes: 0, net_additional_bytes: 0,
+            database_bytes: 0, asset_bytes: 0, peak_bytes: 0, overlap_bytes: 0, net_additional_bytes: 0,
             approximate: false, unknown_size: false, kept_existing: manifest.generation.as_ref().map_or(0, |g| g.kept_existing),
             device_additions: std::collections::BTreeSet::new() });
     }
@@ -148,7 +150,8 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
     // second copy of the databases: each is written through a temporary file
     // or journal, which is there beside it until it is renamed into place.
     let staging = (unit + companions).saturating_mul(staging_folders).saturating_add((64 * 1024).max(16 * unit)).saturating_add(database_bytes);
-    let peak_bytes = staged.saturating_add(staging).saturating_add(estimate.uncertain_adoption_bytes);
+    let (overlap_bytes, uncertain_overlap) = crate::prepared_audio::preview_overlap(destination, &tracks, previous, &root_name, &estimate, options, &trusted, unit)?;
+    let peak_bytes = staged.saturating_add(staging).saturating_add(estimate.uncertain_adoption_bytes).saturating_add(overlap_bytes);
     let net = i128::from(staged) - i128::from(reclaimed);
     let kept_existing = tracks.iter().filter(|t| t.source_unavailable).count();
     let uncertain_revisions = tracks.iter().any(|t| {
@@ -156,8 +159,8 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
         recorded.get(&key).is_some_and(|old| estimate.actions.get(&key).is_some_and(|a| matches!(a, crate::estimate::AudioAction::Copy | crate::estimate::AudioAction::Convert))
             && incremental::revision(&t.source_path).is_ok_and(|r| r.is_some_and(|r| r.size == old.size)))
     });
-    let unknown_size = uncertain_revisions || estimate.uncertain_adoption_bytes > 0 || (options.compatibility.is_some() && tracks.iter().any(|t| t.duration_sec == 0 && !t.device.as_ref().is_some_and(|d| d.preserve)));
-    Ok(SyncPlan { tracks, playlists, approximate: true, estimate, database_bytes, asset_bytes, peak_bytes,
+    let unknown_size = uncertain_overlap || uncertain_revisions || estimate.uncertain_adoption_bytes > 0 || (options.compatibility.is_some() && tracks.iter().any(|t| t.duration_sec == 0 && !t.device.as_ref().is_some_and(|d| d.preserve)));
+    Ok(SyncPlan { tracks, playlists, approximate: true, estimate, database_bytes, asset_bytes, peak_bytes, overlap_bytes,
         net_additional_bytes: i64::try_from(net).unwrap_or(if net < 0 { i64::MIN } else { i64::MAX }), unknown_size, kept_existing, device_additions })
 }
 
