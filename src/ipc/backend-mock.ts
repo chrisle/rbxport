@@ -2485,6 +2485,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     reportAttachment: () => wait("System information\nBrowser preview\n\nApplication log\nNo application log available.\n"),
     openReportAttachment: () => Promise.reject(new Error("Opening the text editor requires the desktop app.")),
     openSyncWindow: () => wait(false),
+    openMissingFiles: () => wait(false),
+    onMissingFilesRequested: () => () => {},
+    missingFilesReady: () => wait(false),
     // Stick after stick, each announced before and after, as the real run
     // is. A destination that is not a mock device is a stick that was
     // pulled: its entry carries the error and the others their reports.

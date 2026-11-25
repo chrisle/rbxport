@@ -1799,5 +1799,7 @@
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} 단계에는 분석 순서에서 앞에 있는 {requirement} 단계가 필요합니다.",
   "Drag stages to change the order they run.": "단계를 끌어서 실행 순서를 변경하세요.",
   "Verifying all existing files": "Verifying all existing files",
-  "Verifying all files on {devices}": "Verifying all files on {devices}"
+  "Verifying all files on {devices}": "Verifying all files on {devices}",
+  "Could not open Display All Missing Files. Try again, or use File in the main window.": "Could not open Display All Missing Files. Try again, or use File in the main window.",
+  "Display All Missing Files opens all missing collection files in the main window and stops this sync.": "Display All Missing Files opens all missing collection files in the main window and stops this sync."
 }

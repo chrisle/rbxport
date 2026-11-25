@@ -38,7 +38,7 @@
 .list > li { display: flex; flex-direction: column; padding: 6px 10px; line-height: 1.4; }
 .list > li + li { border-top: 1px solid var(--c-text-dim); }
 .path { color: var(--c-text-dim); overflow-wrap: anywhere; }
-.buttons { display: flex; justify-content: center; gap: 48px; margin-top: 22px; }
+.buttons { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
 .buttons button {
   min-width: 88px;
   height: var(--s-pref-button-h);

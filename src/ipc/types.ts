@@ -977,6 +977,10 @@ export interface Backend {
    * manager over itself instead.
    */
   openSyncWindow(): Promise<boolean>;
+  /** Opens the existing main-owned manager; true only after it is shown. False in a browser. */
+  openMissingFiles(): Promise<boolean>;
+  onMissingFilesRequested(listener: (id: string) => void): () => void;
+  missingFilesReady(id: string, opened: boolean): Promise<boolean>;
   openReportWindow(): Promise<boolean>;
   reportAttachment(): Promise<string>;
   openReportAttachment(attachment: string): Promise<void>;

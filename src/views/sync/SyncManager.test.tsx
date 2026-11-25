@@ -306,6 +306,64 @@ describe("SyncManager", () => {
     await settle();
     expect(syncDevices).toHaveBeenCalled();
   });
+  it("waits for the main missing-file manager before stopping preflight, without syncing", async () => {
+    const backend = await getBackend();
+    let opened: ((value: boolean) => void) | undefined;
+    const handoff = vi.fn(() => new Promise<boolean>(resolve => { opened = resolve; }));
+    __setBackend({ ...backend, openMissingFiles: handoff });
+    validateExportFiles.mockResolvedValueOnce([{ id: "100001", title: "Missing", path: "/missing.wav", playlists: [] }]);
+    click(box("Closing")); click(box("USB B")); await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')); await settle();
+    const repair = [...host.querySelectorAll<HTMLButtonElement>("dialog button")].find(b => b.textContent === "Display All Missing Files");
+    expect(repair).toBeDefined();
+    click(repair); click(repair); await settle();
+    expect(handoff).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector("dialog")).not.toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(syncDevices).not.toHaveBeenCalled();
+    expect([...host.querySelectorAll<HTMLButtonElement>("dialog button")].every(button => button.disabled)).toBe(true);
+    act(() => opened?.(true)); await settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector("dialog")).toBeNull();
+    expect(syncDevices).not.toHaveBeenCalled();
+  });
+  it("keeps the missing prompt usable when its main-window handoff fails", async () => {
+    const backend = await getBackend();
+    const handoff = vi.fn(() => Promise.reject(new Error("main unavailable")));
+    __setBackend({ ...backend, openMissingFiles: handoff });
+    validateExportFiles.mockResolvedValueOnce([{ id: "100001", title: "Missing", path: "/missing.wav", playlists: [] }]);
+    click(box("Closing")); click(box("USB B")); await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')); await settle();
+    const button = (name: string) => [...host.querySelectorAll<HTMLButtonElement>("dialog button")].find(b => b.textContent === name);
+    click(button("Display All Missing Files")); await settle();
+    expect(document.body.querySelector("dialog [role=alert]")?.textContent).toContain("Could not open Display All Missing Files");
+    expect([...host.querySelectorAll<HTMLButtonElement>("dialog button")].every(b => !b.disabled)).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(syncDevices).not.toHaveBeenCalled();
+    click(button("Cancel")); await settle();
+    expect(document.body.querySelector("dialog")).toBeNull();
+    expect(syncDevices).not.toHaveBeenCalled();
+  });
+  it("uses the browser fallback only after native window support declines", async () => {
+    const backend = await getBackend();
+    const handoff = vi.fn(() => Promise.resolve(false));
+    __setBackend({ ...backend, openMissingFiles: handoff });
+    let visible: (() => void) | undefined;
+    const fallback = vi.fn(() => new Promise<void>(resolve => { visible = resolve; }));
+    act(() => {
+      const preferences = { ...DEFAULT_PREFERENCES, advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary: false } };
+      root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}><SyncManager onClose={onClose} onOpenMissingFiles={fallback} /></PreferencesProvider>);
+    });
+    validateExportFiles.mockResolvedValueOnce([{ id: "100001", title: "Missing", path: "/missing.wav", playlists: [] }]);
+    click(box("Closing")); click(box("USB B")); await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]')); await settle();
+    click([...host.querySelectorAll<HTMLButtonElement>("dialog button")].find(b => b.textContent === "Display All Missing Files")); await settle();
+    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => visible?.()); await settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(syncDevices).not.toHaveBeenCalled();
+  });
   it("stops an export started outside Sync Manager", async () => {
     const job: ExportProgress = { path: "/Volumes/USB B", state: "copying", done: 3, total: 10, title: "Track" };
     act(() => exportProgress?.(job));

@@ -47,6 +47,8 @@ mod preferences;
 mod browse_settings;
 mod protocol;
 mod relocate;
+mod missing_files;
+mod missing_files_request;
 mod sync_window;
 mod report;
 mod scripting;
@@ -443,6 +445,7 @@ pub fn run() {
         .manage(Arc::new(crate::preview::Preview::default()))
         .manage(Arc::new(crate::grid::GridEditor::default()))
         .manage(Arc::new(crate::update::Updates::default()))
+        .manage(Arc::new(crate::missing_files_request::Requests::default()))
         .manage(crate::test_port::TestPort::default())
         .setup(|app| {
             // The system webview runs the whole interface, and on macOS its
@@ -513,6 +516,9 @@ pub fn run() {
         // the process stayed alive showing nothing but Preferences (0.5.1 on
         // Windows, where the main window's close box is the way out).
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed) {
+                window.app_handle().state::<Arc<crate::missing_files_request::Requests>>().window_closed(window.label());
+            }
             if window.label() == MAIN_WINDOW && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 for label in [crate::preferences::WINDOW, crate::sync_window::WINDOW, crate::log_window::WINDOW] {
                     if let Some(extra) = window.app_handle().get_webview_window(label) {
@@ -540,6 +546,8 @@ pub fn run() {
             browse_settings::rekordbox_browse_settings,
             startup::startup_milestone,
             startup::show_window,
+            missing_files::open_missing_files,
+            missing_files::missing_files_ready,
             screen_cache::remember_screen_assets,
             file_drop::dropped_file_paths,
             file_drag::drag_tracks,

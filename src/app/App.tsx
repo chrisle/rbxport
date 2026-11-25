@@ -44,6 +44,7 @@ import { locateLoadedTrack } from "@/lib/locateLoaded";
 import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatch, isTyping, menuAccelerator, type Action } from "@/lib/shortcuts";
 import { hasCommand, runCommand } from "@/lib/commands";
+import { useMissingFilesManager } from "@/views/library/useMissingFilesManager";
 import { browserFocus, followBrowserFocus, onBrowserFocus } from "@/lib/browserFocus";
 import { menuBarEnabled, menuBarAction, menuBarTargets, menuBarSide, menuBarState, onMenuBarState } from "@/lib/menuBar";
 import { hasEditHistory, runEditHistory, setLibraryEditHistory } from "@/lib/editHistory";
@@ -132,7 +133,8 @@ const UpdateManager = lazy(() => import("@/views/update/UpdateManager").then(m =
 const Preferences = lazy(() => import("@/views/settings/Preferences").then(m => ({ default: m.Preferences })));
 const SyncManager = lazy(() => import("@/views/sync/SyncManager").then(m => ({ default: m.SyncManager })));
 const SmartPlaylistEditor = lazy(() => import("@/views/tree/SmartPlaylistEditor").then(m => ({ default: m.SmartPlaylistEditor })));
-const MissingFileManager = lazy(() => import("@/views/library/MissingFileManager").then(m => ({ default: m.MissingFileManager })));
+const prepareMissingFiles = () => import("@/views/library/MissingFileManager").then(m => ({ default: m.MissingFileManager }));
+const MissingFileManager = lazy(prepareMissingFiles);
 
 const SHOW_MAIN_SUPPORT = true;
 
@@ -236,7 +238,7 @@ function AppBody() {
   // configured on a drive that is not connected.
   const [missingLibrary, setMissingLibrary] = useState<LibraryQuestion | null>(null);
   /** File › Display All Missing Files: the Missing File Manager is open. */
-  const [missingFilesOpen, setMissingFilesOpen] = useState(false);
+  const { open: missingFilesOpen, show: showMissingFiles, close: closeMissingFiles, ready: missingFilesReady } = useMissingFilesManager(prepareMissingFiles);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
   // Do not write the empty bootstrap selection over the session while the
   // backend is still restoring the node that was open at exit. WebKit gets
@@ -2514,14 +2516,14 @@ function AppBody() {
       return;
     }
     if (outcome.action === "missing") {
-      setMissingFilesOpen(true);
+      void showMissingFiles().catch(() => {});
       return;
     }
     openPreferences("view");
   }, [
     readOnly, advancedPrefs.protectLibrary, importFromMenu, importFolderFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
     openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider, openReport,
-    editHistory, runLibraryHistory,
+    editHistory, runLibraryHistory, showMissingFiles,
   ]);
 
   // The Track and Playlist menus' greyed items, worked out from the focus
@@ -3733,14 +3735,15 @@ function AppBody() {
           onQuit={() => { void getBackend().then(backend => backend.closeWindow()); }} />
       ) : null}
       {missingFilesOpen ? (
-        <MissingFileManager
+        <Suspense fallback={null}><MissingFileManager
           readOnly={readOnly}
           search={relocateSearch}
           searching={searching}
           onWrote={(said) => { void afterWrite(said); }}
           onFailed={refuse}
-          onClose={() => setMissingFilesOpen(false)}
-        />
+          onClose={closeMissingFiles}
+          onReady={missingFilesReady}
+        /></Suspense>
       ) : null}
       {analysisSelection !== null ? (
         <AnalysisDialog count={analysisSelection.length} initialMode={analysisPrefs.mode}
@@ -3766,7 +3769,7 @@ function AppBody() {
       ) : null}
       {/* Before Preferences, so the import preferences it opens are drawn over it. */}
       {syncOpen ? (
-        <SyncManager onClose={() => setSyncOpen(false)} onSynced={refreshDevices} onOpenPreferences={setSettingsOpen} />
+        <SyncManager onClose={() => setSyncOpen(false)} onSynced={refreshDevices} onOpenPreferences={setSettingsOpen} onOpenMissingFiles={showMissingFiles} />
       ) : null}
       {settingsOpen !== null ? (
         <ConnectedPreferences

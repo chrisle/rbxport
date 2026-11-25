@@ -1799,5 +1799,7 @@
   "{stage} requires {requirement} earlier in the analysis order.": "A(z) {stage} lépéshez a(z) {requirement} lépésnek előrébb kell szerepelnie az elemzési sorrendben.",
   "Drag stages to change the order they run.": "Húzza a lépéseket a végrehajtási sorrend módosításához.",
   "Verifying all existing files": "Verifying all existing files",
-  "Verifying all files on {devices}": "Verifying all files on {devices}"
+  "Verifying all files on {devices}": "Verifying all files on {devices}",
+  "Could not open Display All Missing Files. Try again, or use File in the main window.": "Could not open Display All Missing Files. Try again, or use File in the main window.",
+  "Display All Missing Files opens all missing collection files in the main window and stops this sync.": "Display All Missing Files opens all missing collection files in the main window and stops this sync."
 }

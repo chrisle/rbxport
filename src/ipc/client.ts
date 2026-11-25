@@ -584,6 +584,9 @@ async function realBackend(): Promise<Backend> {
       await invoke<void>("open_sync_window");
       return true;
     },
+    openMissingFiles: async () => { await invoke<void>("open_missing_files"); return true; },
+    onMissingFilesRequested: (listener) => subscribe<string>("missing-files:open", listener),
+    missingFilesReady: (id, opened) => invoke<boolean>("missing_files_ready", { id, opened }),
     syncDevices: (playlists, destinations, defaults, automatic, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, verifyAll) =>
       invoke<SyncDeviceReport[]>("sync_devices", {
         playlists,

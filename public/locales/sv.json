@@ -1797,5 +1797,7 @@
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} kräver att {requirement} kommer tidigare i analysordningen.",
   "Drag stages to change the order they run.": "Dra stegen för att ändra ordningen de körs i.",
   "Verifying all existing files": "Verifying all existing files",
-  "Verifying all files on {devices}": "Verifying all files on {devices}"
+  "Verifying all files on {devices}": "Verifying all files on {devices}",
+  "Could not open Display All Missing Files. Try again, or use File in the main window.": "Could not open Display All Missing Files. Try again, or use File in the main window.",
+  "Display All Missing Files opens all missing collection files in the main window and stops this sync.": "Display All Missing Files opens all missing collection files in the main window and stops this sync."
 }

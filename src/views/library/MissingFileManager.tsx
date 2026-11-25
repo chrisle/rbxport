@@ -110,7 +110,7 @@ const EVERY: Selection = { all: true };
 /** Runs the work straight away, for when no job queue is given. */
 const now = <T,>(work: () => Promise<T>): Promise<T> => work();
 
-export function MissingFileManager({ readOnly, search, searching = now, onWrote, onFailed, onClose }: {
+export function MissingFileManager({ readOnly, search, searching = now, onWrote, onFailed, onClose, onReady }: {
   /** rekordbox holds the library, or Library Protection is on: nothing is written. */
   readOnly: boolean;
   /** The stored Auto Relocate Search Folders. */
@@ -125,6 +125,7 @@ export function MissingFileManager({ readOnly, search, searching = now, onWrote,
   onWrote: (said: string) => void;
   onFailed: (said: string) => void;
   onClose: () => void;
+  onReady?: () => void;
 }) {
   const t = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -150,11 +151,12 @@ export function MissingFileManager({ readOnly, search, searching = now, onWrote,
     const element = dialog.current;
     const previous = document.activeElement;
     element?.showModal();
+    if (element?.open) onReady?.();
     return () => {
       element?.close();
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
-  }, []);
+  }, [onReady]);
 
   /**
    * Checks every file again. After a change made from the manager the list

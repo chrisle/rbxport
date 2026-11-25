@@ -55,6 +55,8 @@ export interface SyncManagerProps {
    * open (the browser build), so it is drawn over this one.
    */
   onOpenPreferences?: ((target: UsbExportTarget) => void) | undefined;
+  /** Browser fallback: resolves after the main-owned manager is visible. */
+  onOpenMissingFiles?: (() => Promise<void>) | undefined;
 }
 
 /** Ticked, not ticked, or a folder with some of its playlists ticked. */
@@ -131,7 +133,7 @@ function TickBox({
   );
 }
 
-export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOpenPreferences }: SyncManagerProps) {
+export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOpenPreferences, onOpenMissingFiles }: SyncManagerProps) {
   const t = useTranslation();
   const exportJobs = useExportProgress();
   const window_ = useRef<HTMLDivElement>(null);
@@ -1219,7 +1221,16 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   );
 
   const dialogs = <>
-    {missingPrompt ? <MissingFilesDialog files={missingPrompt.files} onChoose={missingPrompt.resolve} /> : null}
+    {missingPrompt ? <MissingFilesDialog files={missingPrompt.files} onChoose={missingPrompt.resolve} onRepair={async () => {
+      const backend = await getBackend();
+      if (!await backend.openMissingFiles()) {
+        if (!onOpenMissingFiles) throw new Error("No main window available");
+        await onOpenMissingFiles();
+      }
+      if (!window_.current) return;
+      missingPrompt.resolve(false);
+      onClose();
+    }} /> : null}
     {formatTarget ? <FormatDeviceDialog
       device={formatTarget}
       onFormat={layout => formatDevice(formatTarget, layout)}

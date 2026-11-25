@@ -19,9 +19,15 @@ ancestor cycles cannot make the attribution loop unbounded.
 Cancel stops before export. Keep available copies and sync preserves the
 existing behavior: usable audio already on each USB is retained, and missing
 tracks without usable copies are skipped. This dialog does not relocate files.
-The existing repair route is to cancel, return to the main window, use
-File > Display All Missing Files and its Relocate/Auto Relocate commands, then
-retry sync. No new cross-window handoff or automatic resume is introduced.
+Display All Missing Files opens the existing main-window repair manager and
+stops this sync. Its scope remains all missing collection files, with the
+existing selection, protection, Relocate and Auto Relocate behavior. Opening
+it does not choose files or run repairs. Retry sync explicitly after repairing.
+The native handoff targets only the main window and waits for its displayed
+dialog acknowledgment before closing the preflight; a missing owner or failed
+module load leaves the prompt usable. Duplicate requests and stale replies
+are refused. The browser uses the same App-owned manager. No automatic resume
+or export-only repair selection is introduced.
 
 Native regressions cover overlapping selected playlists, repeated track
 entries, folder plus explicitly selected child, intelligent membership,
