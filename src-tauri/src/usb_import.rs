@@ -348,20 +348,32 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
     if history {
         let snapshot = rbl_export::snapshot::Snapshot::read(root)
             .map_err(|e| err(format!("Could not read play history: {e}")))?;
-        for session in snapshot.history.iter().filter(|h| !h.folder) {
+        // Resolve one session at a time; only an eligible nonempty session
+        // opens a writer. Each import still owns its existing transaction.
+        let mut sessions = snapshot.history.iter().filter(|h| !h.folder).filter_map(|session| {
             let matched: Vec<String> = session.tracks.iter().filter_map(|id| tracks.get(id).map(|t| t.0.clone())).collect();
             if matched.len() != session.tracks.len() {
                 report.skipped += session.tracks.len() - matched.len();
                 report.warnings.push(format!("History '{}' contains tracks that could not be matched to this library; it was left on the USB.", session.name));
-                continue;
+                return None;
             }
-            if matched.is_empty() { continue; }
-            // A session keeps one identity as more tracks are appended. The
-            // writer rejects a changed prefix instead of silently duplicating it.
-            let key = format!("{}:{}:{}", rbl_devices::volume_id(root), session.id, session.name);
-            let hash = rbl_export::manifest::hash(key.as_bytes());
-            let uuid = format!("00000000-0000-4000-8000-{:012x}", hash & 0xffff_ffff_ffff);
-            report.histories += state.write(|w| w.import_usb_history(&format!("{} (USB {:06x})", session.name, hash & 0x00ff_ffff), &uuid, &matched)).map_err(write_error)?;
+            if matched.is_empty() { return None; }
+            Some((session, matched))
+        });
+        if let Some(first) = sessions.next() {
+            let imported = state.write(|w| {
+                let mut imported = 0;
+                for (session, matched) in std::iter::once(first).chain(sessions) {
+                    // A session keeps one identity as more tracks are appended.
+                    // Preserve volume-derived identity and per-session prefix checks.
+                    let key = format!("{}:{}:{}", rbl_devices::volume_id(root), session.id, session.name);
+                    let hash = rbl_export::manifest::hash(key.as_bytes());
+                    let uuid = format!("00000000-0000-4000-8000-{:012x}", hash & 0xffff_ffff_ffff);
+                    imported += w.import_usb_history(&format!("{} (USB {:06x})", session.name, hash & 0x00ff_ffff), &uuid, &matched)?;
+                }
+                Ok(imported)
+            }).map_err(write_error)?;
+            report.histories += imported;
         }
     }
     if settings {
@@ -1208,6 +1220,146 @@ mod tests {
             Ok(rows)
         }).unwrap();
         assert_eq!(imported, vec![live]);
+    }
+
+    fn history_import_fixture(dir: &Path) -> (AppState, std::path::PathBuf) {
+        let location = rbl_db::fixture::build(dir, rbl_db::fixture::Shape {
+            tracks: 3, playlists: 0, tracks_per_playlist: 0, history_sessions: 0,
+            ..Default::default()
+        }).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        drop(db);
+        (state, dir.join("usb"))
+    }
+
+    fn write_history_sessions(state: &AppState, usb: &Path, sessions: &[(i64, &str, &[i64])]) -> std::path::PathBuf {
+        let db_id = state.read_db(|db| rbl_db::export_info::db_id(db.connection())).unwrap();
+        let one = usb.join("PIONEER/rekordbox/exportLibrary.db");
+        std::fs::create_dir_all(one.parent().unwrap()).unwrap();
+        if one.exists() { std::fs::remove_file(&one).unwrap(); }
+        let mut builder = rbl_onelibrary::build::Builder::create(&one).unwrap();
+        for index in 0..4 {
+            builder.add_track(&rbl_onelibrary::build::Track {
+                content_id: i64::try_from(index + 1).unwrap(),
+                master_db_id: i64::try_from(db_id).unwrap(),
+                master_content_id: if index < 3 { rbl_db::fixture::track_id(index).parse().unwrap() } else { 99999 },
+                title: format!("Track {index}"), path: format!("/Contents/{index}.mp3"),
+                ..Default::default()
+            }).unwrap();
+        }
+        builder.add_history(10000, "Folder", 0, 0, true).unwrap();
+        for &(id, name, tracks) in sessions {
+            builder.add_history(id, name, 0, id, false).unwrap();
+            for (sequence, &content) in tracks.iter().enumerate() {
+                builder.add_history_track(id, content, i64::try_from(sequence + 1).unwrap()).unwrap();
+            }
+        }
+        builder.finish("Disposable history writer fixture", "2026-11-25", 0).unwrap();
+        one
+    }
+
+    fn imported_history_rows(state: &AppState, name: &str) -> Vec<(String, String, i64, String, i64)> {
+        state.read_db(|db| {
+            let mut q = db.connection().prepare(
+                "SELECT h.UUID, s.ContentID, s.TrackNo, s.UUID, s.rb_local_usn
+                 FROM djmdSongHistory s JOIN djmdHistory h ON h.ID=s.HistoryID
+                 WHERE h.Name LIKE ?1 AND s.rb_local_deleted=0
+                 ORDER BY h.Name, s.TrackNo")?;
+            let values = q.query_map([format!("{name} (USB %")], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?,
+                r.get::<_,i64>(2)?, r.get::<_,String>(3)?, r.get::<_,i64>(4)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(values)
+        }).unwrap()
+    }
+
+    /// Connection lifetime must not scale with the number of history sessions.
+    /// Each session keeps its existing transaction, order and repeated plays.
+    #[test]
+    fn history_import_reuses_one_writer_for_all_eligible_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, usb) = history_import_fixture(dir.path());
+        let names: Vec<String> = (1..=33).map(|id| format!("Writer probe {id:02}")).collect();
+        let sessions: Vec<_> = names.iter().enumerate().map(|(index, name)|
+            (i64::try_from(index + 1).unwrap(), name.as_str(), &[1, 2, 1][..])).collect();
+        let one = write_history_sessions(&state, &usb, &sessions);
+        let usb_before = std::fs::read(&one).unwrap();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let opens = state.writer_opens();
+        let report = import(&state, &editor, &usb, false, true, false, false).unwrap();
+        let first_opens = state.writer_opens() - opens;
+        assert_eq!((report.histories, report.skipped), (99, 0));
+        let rows = || imported_history_rows(&state, "Writer probe %");
+        let before_repeat = rows();
+        assert_eq!(before_repeat.len(), 99);
+        for session in before_repeat.chunks_exact(3) {
+            assert_eq!(session.iter().map(|r| (r.1.clone(), r.2)).collect::<Vec<_>>(),
+                vec![(rbl_db::fixture::track_id(0), 1), (rbl_db::fixture::track_id(1), 2), (rbl_db::fixture::track_id(0), 3)]);
+        }
+        let opens = state.writer_opens();
+        let repeat = import(&state, &editor, &usb, false, true, false, false).unwrap();
+        let repeat_opens = state.writer_opens() - opens;
+        assert_eq!((repeat.histories, repeat.skipped), (0, 0));
+        assert_eq!(rows(), before_repeat, "exact repeat preserves row identities, order and USNs");
+        assert_eq!(std::fs::read(&one).unwrap(), usb_before, "import never rewrites its source USB");
+        assert!(first_opens <= 1 && repeat_opens <= 1,
+            "33 eligible sessions opened {first_opens} writers on first import and {repeat_opens} on exact repeat");
+    }
+
+    #[test]
+    fn history_import_with_no_eligible_session_opens_no_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, usb) = history_import_fixture(dir.path());
+        let one = write_history_sessions(&state, &usb, &[(1, "Empty", &[]), (2, "Mixed", &[1, 4])]);
+        let before = std::fs::read(&one).unwrap();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let opens = state.writer_opens();
+        let report = import(&state, &editor, &usb, false, true, false, false).unwrap();
+        assert_eq!(state.writer_opens(), opens);
+        assert_eq!((report.histories, report.skipped), (0, 1));
+        assert_eq!(report.warnings, vec!["History 'Mixed' contains tracks that could not be matched to this library; it was left on the USB.".to_owned()]);
+        assert!(imported_history_rows(&state, "%").is_empty());
+        assert_eq!(std::fs::read(one).unwrap(), before);
+    }
+
+    #[test]
+    fn shared_history_writer_preserves_append_repeat_and_committed_prefix_on_later_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, usb) = history_import_fixture(dir.path());
+        write_history_sessions(&state, &usb, &[(1, "Alpha", &[1, 2, 1]), (2, "Beta", &[2])]);
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        assert_eq!(import(&state, &editor, &usb, false, true, false, false).unwrap().histories, 4);
+        let alpha_initial = imported_history_rows(&state, "Alpha");
+        let beta_initial = imported_history_rows(&state, "Beta");
+        let one = write_history_sessions(&state, &usb, &[(1, "Alpha", &[1, 2, 1, 3]), (2, "Beta", &[2, 3])]);
+        let source_before = std::fs::read(&one).unwrap();
+        let opens = state.writer_opens();
+        assert_eq!(import(&state, &editor, &usb, false, true, false, false).unwrap().histories, 2);
+        assert_eq!(state.writer_opens() - opens, 1);
+        let alpha_appended = imported_history_rows(&state, "Alpha");
+        let beta_appended = imported_history_rows(&state, "Beta");
+        assert_eq!(&alpha_appended[..3], alpha_initial.as_slice());
+        assert_eq!(&beta_appended[..1], beta_initial.as_slice());
+        assert_eq!(import(&state, &editor, &usb, false, true, false, false).unwrap().histories, 0);
+        assert_eq!(imported_history_rows(&state, "Alpha"), alpha_appended);
+        assert_eq!(imported_history_rows(&state, "Beta"), beta_appended);
+        assert_eq!(std::fs::read(&one).unwrap(), source_before);
+        // Alpha commits before Beta's changed prefix refuses. Sharing the
+        // connection must not turn the sessions into one atomic transaction.
+        write_history_sessions(&state, &usb, &[(1, "Alpha", &[1, 2, 1, 3, 2]), (2, "Beta", &[1, 3])]);
+        let source_before = std::fs::read(&one).unwrap();
+        let opens = state.writer_opens();
+        let error = import(&state, &editor, &usb, false, true, false, false).unwrap_err();
+        assert!(error.message.contains("history changed"));
+        assert_eq!(state.writer_opens() - opens, 1);
+        let alpha_after = imported_history_rows(&state, "Alpha");
+        assert_eq!(alpha_after.len(), 5);
+        assert_eq!(&alpha_after[..4], alpha_appended.as_slice());
+        assert_eq!(alpha_after[4].1, rbl_db::fixture::track_id(1));
+        assert_eq!(imported_history_rows(&state, "Beta"), beta_appended);
+        assert_eq!(std::fs::read(one).unwrap(), source_before);
     }
 
     /// A library and a stick rekordbox wrote from it: every fixture track on
