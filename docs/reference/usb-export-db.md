@@ -312,8 +312,11 @@ The subtype and trailer words are required for the tested CDJ-3000 path.
 Leaving them zero produced a named but empty playlist even though a
 semantic reader could find every track. The trailer meanings remain
 uncharacterized; the writer reproduces rekordbox's values. `audio_format`
-is derived from the final exported filename: MP3=1, M4A/AAC=4, FLAC=5,
+is derived from the final exported filename: MP3=1, standalone AAC=2, M4A=4, FLAC=5,
 WAV=11, AIFF=12. A converted track must use its destination format.
+Older RBXport AAC exports with type 4 remain verifiable. An unchanged sync can
+reuse them; a normal database rebuild corrects the type without recopying audio.
+AAC and ALAC carried in M4A retain the existing container mapping here.
 
 The words at `0x04`, `0x14` and `0x18` are columns of rekordbox's
 DJDBCONTENT table, which the XDJ-700 1.15 firmware also names: CONTENTLINK,

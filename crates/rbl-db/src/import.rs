@@ -165,11 +165,13 @@ fn field_sources(tagged: &TaggedFile) -> (Vec<&Tag>, Vec<&Tag>) {
 
 /// `djmdContent.FileType` for a file, by extension: what rekordbox writes on
 /// 38,681 reference rows [OBS] — 1 on every `.mp3`, 4 on `.m4a`, 5 on `.flac`,
-/// 11 on `.wav`, 12 on `.aiff`/`.aif`. Anything else is unseen and left unset.
+/// 11 on `.wav`, 12 on `.aiff`/`.aif`. The standalone `.aac` parser returns
+/// type 2; AAC carried in `.m4a` remains type 4. Other extensions stay unset.
 #[must_use]
 pub fn file_type(path: &Path) -> Option<i64> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
         "mp3" => Some(1),
+        "aac" => Some(2),
         "m4a" => Some(4),
         "flac" => Some(5),
         "wav" => Some(11),

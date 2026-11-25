@@ -239,7 +239,11 @@ fn verify_track_records(root: &Path, errors: &mut Vec<String>) -> Result<()> {
             }
             let filename = pdb.string_ref(row, 0x5e + 19 * 2);
             let expected = rbl_pdb::rows::audio_file_type(&filename);
-            if expected != 0 && pdb.u2_at(row, 0x5a) != expected {
+            let actual = pdb.u2_at(row, 0x5a);
+            // Older RBXport exports labeled standalone AAC as M4A. Keep those
+            // readable; a normal database rebuild writes the dedicated AAC type.
+            let legacy_aac = expected == 2 && actual == 4;
+            if expected != 0 && actual != expected && !legacy_aac {
                 errors.push(format!("Track {id}: DeviceSQL audio format does not match {filename}"));
             }
         }
