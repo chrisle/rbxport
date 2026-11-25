@@ -343,6 +343,7 @@ pub struct NamedRow {
 /// The subset of a track row the application uses.
 #[derive(Debug, Clone, Default)]
 pub struct TrackRow {
+    pub audio_file_type: u16,
     pub hot_cue_auto_load: bool,
     pub sample_depth: u16,
     pub disc_number: u16,
@@ -523,6 +524,7 @@ impl Pdb<'_> {
             .map(|row| {
                 let text = |slot: usize| self.string_ref(row, 0x5e + slot * 2);
                 TrackRow {
+                    audio_file_type: self.u2_at(row, 0x5a),
                     hot_cue_auto_load: text(7) == "ON",
                     sample_depth: self.u2_at(row, 0x52),
                     disc_number: self.u2_at(row, 0x4c),

@@ -37,6 +37,8 @@ pub mod slot {
 /// Everything needed to write one track row.
 #[derive(Debug, Clone, Default)]
 pub struct TrackInput {
+    /// Resolved final output format; absent retains the extension mapping.
+    pub audio_file_type: Option<u16>,
     pub hot_cue_auto_load: bool,
     pub id: u32,
     pub artist_id: u32,
@@ -183,7 +185,7 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     if let Some(b) = row.get_mut(0x59) {
         *b = input.rating;
     }
-    put_u2(&mut row, 0x5a, audio_file_type(&input.filename));
+    put_u2(&mut row, 0x5a, input.audio_file_type.unwrap_or_else(|| audio_file_type(&input.filename)));
     put_u2(&mut row, 0x5c, 3);
 
     // Append each string, recording where it landed. Long strings start

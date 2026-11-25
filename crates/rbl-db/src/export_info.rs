@@ -232,11 +232,18 @@ fn unsigned<T: TryFrom<i64> + Default>(value: rusqlite::types::ValueRef<'_>, lar
 pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String, TrackExtras>> {
     let mut out: HashMap<String, TrackExtras> = HashMap::with_capacity(ids.len());
     let tagged = has_table(conn, "djmdSongMyTag");
+    // Older/minimal schemas may lack this optional refinement. Inspect once,
+    // not per row, and keep unrelated SQL failures observable.
+    let has_file_type: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('djmdContent') WHERE name='FileType' COLLATE NOCASE)",
+        [], |row| row.get(0),
+    )?;
+    let file_type = if has_file_type { "FileType" } else { "NULL" };
     for chunk in ids.chunks(900) {
         let marks = vec!["?"; chunk.len()].join(",");
         let params = rusqlite::params_from_iter(chunk.iter());
         let mut stmt = conn.prepare(&format!(
-            "SELECT ID, rb_LocalFolderPath, OrgFolderPath, TrackNo, DiscNo, BitDepth, DJPlayCount, Analysed, HotCueAutoLoad, DateCreated, ISRC, ContentLink FROM djmdContent WHERE ID IN ({marks})"
+            "SELECT ID, rb_LocalFolderPath, OrgFolderPath, TrackNo, DiscNo, BitDepth, DJPlayCount, Analysed, HotCueAutoLoad, DateCreated, ISRC, ContentLink, {file_type} FROM djmdContent WHERE ID IN ({marks})"
         ))?;
         let rows = stmt.query_map(params, |r| {
             Ok((
@@ -244,6 +251,7 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
                 r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 r.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 rbl_core::ExportMetadata {
+                    audio_file_type: (whole(r.get_ref(12)?) == 6).then_some(6),
                     track_number: unsigned(r.get_ref(3)?, i64::from(u32::MAX)),
                     disc_number: unsigned(r.get_ref(4)?, i64::from(u16::MAX)),
                     bit_depth: unsigned(r.get_ref(5)?, i64::from(u16::MAX)),
@@ -493,6 +501,13 @@ mod tests {
         assert_eq!(extras["1"].metadata.content_link, 0x000c_0700);
         assert_eq!(extras["2"].metadata.content_link, 0x100);
         assert_eq!(extras["3"].metadata.content_link, 0x000c_0700, "a link stored as text");
+        assert_eq!(extras["1"].metadata.audio_file_type, None, "old schemas keep their unknown codec");
+        conn.execute_batch("ALTER TABLE djmdContent ADD COLUMN FileType INTEGER; UPDATE djmdContent SET FileType=6 WHERE ID='1';").unwrap();
+        let refined = track_extras(&conn, &["1".to_owned(), "2".to_owned()]).unwrap();
+        assert_eq!(refined["1"].metadata.audio_file_type, Some(6));
+        assert_eq!(refined["2"].metadata.audio_file_type, None);
+        conn.execute_batch("ALTER TABLE djmdContent DROP COLUMN ContentLink").unwrap();
+        assert!(track_extras(&conn, &["1".to_owned()]).is_err(), "unrelated schema errors are not codec fallbacks");
     }
 
     /// The tags' master id is the Cloud Library Sync property's id when the

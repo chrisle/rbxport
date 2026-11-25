@@ -22,6 +22,8 @@ pub const AUDIO_EXTENSIONS: &[&str] =
 /// still importable, it just arrives with its filename as its title.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrackTags {
+    /// Confirmed MP4 codec: 4 for AAC, 6 for ALAC. None retains the extension fallback.
+    pub mp4_file_type: Option<i64>,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -166,7 +168,8 @@ fn field_sources(tagged: &TaggedFile) -> (Vec<&Tag>, Vec<&Tag>) {
 /// `djmdContent.FileType` for a file, by extension: what rekordbox writes on
 /// 38,681 reference rows [OBS] — 1 on every `.mp3`, 4 on `.m4a`, 5 on `.flac`,
 /// 11 on `.wav`, 12 on `.aiff`/`.aif`. The standalone `.aac` parser returns
-/// type 2; AAC carried in `.m4a` remains type 4. Other extensions stay unset.
+/// type 2; AAC carried in `.m4a` remains type 4. Confirmed ALAC from
+/// [`read_tags`] overrides this extension fallback with type 6. Other extensions stay unset.
 #[must_use]
 pub fn file_type(path: &Path) -> Option<i64> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
@@ -295,7 +298,24 @@ fn walk(dir: &Path, depth: usize, budget: &mut WalkBudget, files: &mut Vec<std::
 /// plays, so it is read again in relaxed mode, which leaves the bad field
 /// empty. The first error is the one reported if both reads fail.
 fn read_tagged(path: &Path, options: ParseOptions) -> Result<TaggedFile, ImportError> {
-    let read = |options: ParseOptions| Probe::open(path).map(|probe| probe.options(options)).and_then(Probe::read);
+    read_tagged_with_type(path, options).map(|(tagged, _)| tagged)
+}
+
+fn read_tagged_with_type(path: &Path, options: ParseOptions) -> Result<(TaggedFile, Option<i64>), ImportError> {
+    let read = |options: ParseOptions| -> lofty::error::Result<(TaggedFile, Option<i64>)> {
+        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("m4a")) {
+            let mut source = std::io::BufReader::new(std::fs::File::open(path)?);
+            let file = lofty::mp4::Mp4File::read_from(&mut source, options)?;
+            let kind = match file.properties().codec() {
+                lofty::mp4::Mp4Codec::AAC => Some(4),
+                lofty::mp4::Mp4Codec::ALAC => Some(6),
+                _ => None,
+            };
+            Ok((file.into(), kind))
+        } else {
+            Probe::open(path).map(|probe| probe.options(options)).and_then(Probe::read).map(|tagged| (tagged, None))
+        }
+    };
     let mut relaxed = options;
     relaxed.parsing_mode(ParsingMode::Relaxed);
     read(options)
@@ -341,10 +361,11 @@ pub fn read_tags(path: &Path) -> Result<TrackTags, ImportError> {
     // disk and 56 ms cold from an SD card against under a millisecond
     // without [OBS], which is the difference between an Explorer page that
     // lands and one that stalls.
-    let tagged = read_tagged(path, ParseOptions::new().read_cover_art(false))?;
+    let (tagged, mp4_file_type) = read_tagged_with_type(path, ParseOptions::new().read_cover_art(false))?;
 
     let properties = tagged.properties();
     let mut tags = TrackTags {
+        mp4_file_type,
         duration_sec: u32::try_from(properties.duration().as_secs()).unwrap_or(0),
         bitrate: properties.audio_bitrate().unwrap_or(0),
         sample_rate: properties.sample_rate().unwrap_or(0),
@@ -638,6 +659,41 @@ mod tests {
         out.extend_from_slice(&u32::try_from(body.len()).unwrap().to_be_bytes());
         out.extend_from_slice(&body);
         std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn typed_mp4_probe_preserves_generic_reader_and_relaxed_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let payloads: &[&[u8]] = &[
+            include_bytes!("../tests/fixtures/silent.m4a"),
+            include_bytes!("../tests/fixtures/generated-alac.m4a"),
+            // Ordinary valid ADTS with an incorrect container extension.
+            include_bytes!("../tests/fixtures/generated-tone.aac"),
+        ];
+        for payload in payloads {
+            let path = root.path().join("Generated.M4A");
+            std::fs::write(&path, payload).unwrap();
+            for options in [ParseOptions::new().read_cover_art(false), ParseOptions::new().read_properties(false)] {
+                let read = |options: ParseOptions| Probe::open(&path).map(|probe| probe.options(options)).and_then(Probe::read);
+                let mut relaxed = options;
+                relaxed.parsing_mode(ParsingMode::Relaxed);
+                let before = read(options).or_else(|first| read(relaxed).map_err(|_| first));
+                let after = read_tagged(&path, options);
+                match (before, after) {
+                    (Ok(before), Ok(after)) => {
+                        assert_eq!(before.file_type(), after.file_type());
+                        assert_eq!(before.properties().duration(), after.properties().duration());
+                        assert_eq!(before.properties().sample_rate(), after.properties().sample_rate());
+                        assert_eq!(before.properties().bit_depth(), after.properties().bit_depth());
+                        assert_eq!(before.tags().len(), after.tags().len());
+                    }
+                    (Err(before), Err(after)) => assert_eq!(after.to_string(), ImportError::Unreadable {
+                        path: path.display().to_string(), reason: before.to_string(),
+                    }.to_string()),
+                    _ => panic!("the typed MP4 reader changed container admission"),
+                }
+            }
+        }
     }
 
     /// A tenth of a second of silent AAC in an M4A, made by `afconvert`, with

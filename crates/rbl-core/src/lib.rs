@@ -58,6 +58,10 @@ impl core::fmt::Display for FourCc {
 /// Library metadata needed by both USB database formats beyond the browse index.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExportMetadata {
+    /// Known ALAC-in-M4A type 6, where the extension alone only identifies M4A.
+    /// Missing on old records; ordinary format codes still follow the output filename.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_file_type: Option<u16>,
     pub track_number: u32,
     pub disc_number: u16,
     pub bit_depth: u16,

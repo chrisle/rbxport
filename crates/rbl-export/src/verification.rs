@@ -243,7 +243,8 @@ fn verify_track_records(root: &Path, errors: &mut Vec<String>) -> Result<()> {
             // Older RBXport exports labeled standalone AAC as M4A. Keep those
             // readable; a normal database rebuild writes the dedicated AAC type.
             let legacy_aac = expected == 2 && actual == 4;
-            if expected != 0 && actual != expected && !legacy_aac {
+            let alac = expected == 4 && actual == 6;
+            if expected != 0 && actual != expected && !legacy_aac && !alac {
                 errors.push(format!("Track {id}: DeviceSQL audio format does not match {filename}"));
             }
         }

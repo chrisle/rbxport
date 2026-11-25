@@ -274,7 +274,10 @@ impl PreparationCache {
         if let Some(value) = probes.get(&key) { return Ok(value.clone()); }
         let path = self.root.join(format!("{key}.probe"));
         let saved = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<ProbeReceipt>(&b).ok());
-        let value = if let Some(probe) = saved.filter(|p| p.source == revision && incremental::digest(&(&p.source, &p.properties)).is_ok_and(|hash| hash == p.checksum)) {
+        let mp4 = source.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("m4a"));
+        let value = if let Some(probe) = saved.filter(|p| p.source == revision
+            && (!mp4 || p.properties.mp4_file_type.is_some())
+            && incremental::digest(&(&p.source, &p.properties)).is_ok_and(|hash| hash == p.checksum)) {
             probe.properties
         } else {
                 incremental::count(false, false, true);

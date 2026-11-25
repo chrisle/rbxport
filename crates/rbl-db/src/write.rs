@@ -206,6 +206,8 @@ fn my_tag_names_under(conn: &Connection, category: &str) -> Result<Vec<String>> 
 /// so the set of legal names is spelled out rather than trusted.
 const WRITABLE_COLUMNS: &[&str] = &[
     "Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL", "SmartList",
+    // Codec refinement from Reload Tag is replayed by the same checked history.
+    "FileType",
     // The tempo, which a grid edit changes with the `.DAT`'s grid.
     "BPM",
     // The information panel's Info tab.
@@ -5137,6 +5139,7 @@ impl Writer {
         let stamp = time::now();
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut fields = Vec::new();
+        if let Some(kind) = tags.mp4_file_type { fields.push(("FileType", Value::Integer(kind))); }
         for (column, value) in [
             ("Title", &tags.title), ("Commnt", &tags.comment), ("Subtitle", &tags.subtitle),
             ("Lyricist", &tags.lyricist), ("ISRC", &tags.isrc),
@@ -6070,7 +6073,7 @@ fn insert_content(conn: &Connection, row: &NewContent<'_>) -> Result<()> {
             i64::from(tags.bit_depth),
             i64::from(tags.sample_rate),
             i64::try_from(tags.file_size).unwrap_or(0),
-            crate::import::file_type(path),
+            tags.mp4_file_type.or_else(|| crate::import::file_type(path)),
             i64::from(tags.year),
             i64::from(tags.track_no),
             tags.comment,

@@ -1599,15 +1599,37 @@ fn export_cancellable_inner(
                 && c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/')))));
         let mut hydrated = track.clone();
         let source_changed = !source_receipt_matches && !source_contents_unchanged.contains(&key) && !track.source_unavailable && !preserved;
-        let content_changed = source_changed && carried.is_some_and(|c| {
+        let content_hashes = carried.map(|c| {
             let old_hash = if c.conversion.is_empty() { c.audio_hash } else { c.conversion_source_hash };
             let now = if conversion.is_some() { Some(source_hash) } else { copied_hash.get() };
-            now.is_none_or(|now| old_hash == 0 || old_hash != now)
+            (old_hash, now)
         });
+        let content_changed = source_changed && content_hashes.is_some_and(|(old, now)| now.is_none_or(|now| old == 0 || old != now));
+        let proven_content_change = source_changed && content_hashes.is_some_and(|(old, now)| old != 0 && now.is_some_and(|now| old != now));
+        // Only a rebuilt database needs codec refinement. The receipt no-op
+        // returned before this loop; conversion's final filename stays authoritative.
+        let classify_mp4 = rbl_pdb::rows::audio_file_type(&place.file_name) == 4
+            && !track.source_unavailable && (source_changed || track.metadata.audio_file_type != Some(6));
+        let properties = if content_changed || classify_mp4 {
+            match cache.map_or_else(|| rbl_audio::compatibility::inspect(&track.source_path).map_err(|e| std::io::Error::other(e.to_string()).into()), |cache| cache.properties(&track.source_path)) {
+                Ok(properties) => Some(properties),
+                Err(error @ ExportError::Conflict(_)) => return Err(error),
+                Err(_) => None, // Keep the existing metadata fallback for unreadable properties.
+            }
+        } else { None };
+        if classify_mp4 {
+            match properties.as_ref().and_then(|properties| properties.mp4_file_type) {
+                Some(6) => hydrated.metadata.audio_file_type = Some(6),
+                Some(4) => hydrated.metadata.audio_file_type = None,
+                // An uncertain read cannot attach an obsolete codec to proven
+                // replacement bytes. Unknown/equal content keeps its known type.
+                _ if proven_content_change => hydrated.metadata.audio_file_type = None,
+                _ => {}
+            }
+        }
         if content_changed {
             hydrated.file_size = size;
-            let properties = cache.map_or_else(|| rbl_audio::compatibility::inspect(&track.source_path).map_err(|e| std::io::Error::other(e.to_string()).into()), |cache| cache.properties(&track.source_path));
-            if let Ok(properties) = properties {
+            if let Some(properties) = properties {
                 if let Some(rate) = properties.sample_rate.filter(|r| *r > 0) {
                     hydrated.sample_rate = rate;
                     if let Some(frames) = properties.frames { hydrated.duration_sec = u16::try_from(frames / u64::from(rate)).unwrap_or(u16::MAX); }
@@ -1882,6 +1904,7 @@ fn export_cancellable_inner(
         });
 
         track_rows.push(track_row(&TrackInput {
+            audio_file_type: Some(output_audio_file_type(&place.file_name, &track.metadata)),
             hot_cue_auto_load: track.metadata.hot_cue_auto_load,
             id: export_id,
             artwork_id,
@@ -2485,6 +2508,13 @@ fn my_tag_master_db_id(sync: Option<&SyncSource>) -> u32 {
     })
 }
 
+// Both database writers use the same resolved output type. An ALAC source
+// converted to WAV/AIFF/MP3 must never carry type 6 into its converted record.
+fn output_audio_file_type(filename: &str, metadata: &rbl_core::ExportMetadata) -> u16 {
+    let extension = rbl_pdb::rows::audio_file_type(filename);
+    if extension == 4 && metadata.audio_file_type == Some(6) { 6 } else { extension }
+}
+
 /// The subset of a track `exportLibrary.db` needs.
 struct OneLibraryTrack {
     metadata: rbl_core::ExportMetadata,
@@ -2701,7 +2731,7 @@ fn add_tracks(
         builder
             .add_track(&Track {
                 metadata: track.metadata.clone(),
-                file_type: i64::from(rbl_pdb::rows::audio_file_type(&track.file_name)),
+                file_type: i64::from(output_audio_file_type(&track.file_name, &track.metadata)),
                 year: i64::from(track.year), release_date: track.release_date.clone(),
                 bitrate: i64::from(track.bitrate), sample_rate: i64::from(track.sample_rate),
                 content_id: i64::from(track.export_id),

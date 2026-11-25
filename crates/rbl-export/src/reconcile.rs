@@ -646,7 +646,7 @@ fn read_sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTr
         sources_from_one(root, &dir, &mut out)?;
     }
     if before.legacy.is_some() {
-        sources_from_legacy(root, &dir, &mut out)?;
+        sources_from_legacy(root, &dir, before, &mut out)?;
     }
     fill_source_details(root, before, manifest.as_ref(), &mut out)?;
     Ok(out)
@@ -676,13 +676,14 @@ fn release_year(value: i64) -> u16 {
 fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack>) -> Result<()> {
     let db = rbl_onelibrary::ExportLibrary::open_read_only(&dir.join("exportLibrary.db"))
         .map_err(sql)?;
-    let mut q = db.connection().prepare("SELECT c.content_id, COALESCE(c.title,''), COALESCE(a.name,''), COALESCE(al.name,''), COALESCE(g.name,''), COALESCE(l.name,''), COALESCE(k.name,''), COALESCE(c.djComment,''), COALESCE(c.dateAdded,''), COALESCE(c.releaseDate,''), COALESCE(c.bpmx100,0), COALESCE(c.length,0), COALESCE(c.rating,0), COALESCE(c.color_id,0), COALESCE(c.releaseYear,0), COALESCE(c.bitrate,0), COALESCE(c.samplingRate,0), COALESCE(c.fileSize,0), COALESCE(i.path,''), COALESCE(c.trackNo,0), COALESCE(c.discNo,0), COALESCE(c.bitDepth,0), COALESCE(c.djPlayCount,0), COALESCE(c.analysedBits,0), COALESCE(c.isHotCueAutoLoadOn,0), COALESCE(c.dateCreated,''), COALESCE(c.isrc,''), COALESCE(c.contentLink,0) FROM content c LEFT JOIN artist a ON a.artist_id=c.artist_id_artist LEFT JOIN album al ON al.album_id=c.album_id LEFT JOIN genre g ON g.genre_id=c.genre_id LEFT JOIN label l ON l.label_id=c.label_id LEFT JOIN key k ON k.key_id=c.key_id LEFT JOIN image i ON i.image_id=c.image_id").map_err(sql)?;
+    let mut q = db.connection().prepare("SELECT c.content_id, COALESCE(c.title,''), COALESCE(a.name,''), COALESCE(al.name,''), COALESCE(g.name,''), COALESCE(l.name,''), COALESCE(k.name,''), COALESCE(c.djComment,''), COALESCE(c.dateAdded,''), COALESCE(c.releaseDate,''), COALESCE(c.bpmx100,0), COALESCE(c.length,0), COALESCE(c.rating,0), COALESCE(c.color_id,0), COALESCE(c.releaseYear,0), COALESCE(c.bitrate,0), COALESCE(c.samplingRate,0), COALESCE(c.fileSize,0), COALESCE(i.path,''), COALESCE(c.trackNo,0), COALESCE(c.discNo,0), COALESCE(c.bitDepth,0), COALESCE(c.djPlayCount,0), COALESCE(c.analysedBits,0), COALESCE(c.isHotCueAutoLoadOn,0), COALESCE(c.dateCreated,''), COALESCE(c.isrc,''), COALESCE(c.contentLink,0), COALESCE(c.fileType,0) FROM content c LEFT JOIN artist a ON a.artist_id=c.artist_id_artist LEFT JOIN album al ON al.album_id=c.album_id LEFT JOIN genre g ON g.genre_id=c.genre_id LEFT JOIN label l ON l.label_id=c.label_id LEFT JOIN key k ON k.key_id=c.key_id LEFT JOIN image i ON i.image_id=c.image_id").map_err(sql)?;
     let rows = q
         .query_map([], |r| {
             Ok((
                 r.get::<_, u32>(0)?,
                 SourceTrack {
                     metadata: rbl_core::ExportMetadata {
+                        audio_file_type: r.get_ref(28)?.as_i64().ok().filter(|kind| *kind == 6).map(|_| 6),
                         track_number: crate::snapshot::unsigned_or_zero(r.get(19)?), disc_number: crate::snapshot::unsigned_or_zero(r.get(20)?), bit_depth: crate::snapshot::unsigned_or_zero(r.get(21)?),
                         play_count: crate::snapshot::unsigned_or_zero(r.get(22)?), analysed: analysed_bits(r.get(23)?), hot_cue_auto_load: r.get(24)?,
                         date_created: r.get(25)?, isrc: r.get(26)?,
@@ -726,8 +727,9 @@ fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack
 
 /// The legacy database's share of [`sources`]: tracks `OneLibrary` did not
 /// provide, plus a valid year when `OneLibrary` has no usable year.
-fn sources_from_legacy(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack>) -> Result<()> {
+fn sources_from_legacy(root: &Path, dir: &Path, before: &Snapshot, out: &mut BTreeMap<u32, SourceTrack>) -> Result<()> {
     use rbl_pdb::PageType;
+    let paired: BTreeMap<_, _> = before.one.iter().flat_map(|library| &library.tracks).map(|track| (track.id, track.path.as_str())).collect();
     let bytes = std::fs::read(dir.join("export.pdb"))?;
     let pdb = rbl_pdb::Pdb::parse(&bytes).map_err(sql)?;
     let names = |kind| -> BTreeMap<u32, String> {
@@ -753,11 +755,19 @@ fn sources_from_legacy(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTr
     {
         let legacy_year = t.year;
         out.entry(t.id).and_modify(|one| {
+            // Type 4 is the old generic M4A fallback. Borrow the more specific
+            // ALAC fact only from this exact paired row/audio/origin identity.
+            let origin = (u64::from(t.master_db_id), u64::from(t.master_content_id));
+            if one.metadata.audio_file_type.is_none() && t.audio_file_type == 6
+                && paired.get(&t.id).is_some_and(|path| *path == t.file_path)
+                && origin.0 != 0 && origin.1 != 0 && before.identity.get(&t.id) == Some(&origin) {
+                one.metadata.audio_file_type = Some(6);
+            }
             if one.year == 0 && legacy_year != 0 {
                 one.year = legacy_year;
             }
         }).or_insert(SourceTrack {
-            metadata: rbl_core::ExportMetadata { track_number: t.track_number, play_count: u32::from(t.play_count), bit_depth: t.sample_depth, disc_number: t.disc_number, hot_cue_auto_load: t.hot_cue_auto_load, date_created: t.date_created, content_link: t.content_link, ..Default::default() },
+            metadata: rbl_core::ExportMetadata { audio_file_type: (t.audio_file_type == 6).then_some(6), track_number: t.track_number, play_count: u32::from(t.play_count), bit_depth: t.sample_depth, disc_number: t.disc_number, hot_cue_auto_load: t.hot_cue_auto_load, date_created: t.date_created, content_link: t.content_link, ..Default::default() },
             title: t.title,
             artist: artists.get(&t.artist_id).cloned().unwrap_or_default(),
             album: albums.get(&t.album_id).cloned().unwrap_or_default(),

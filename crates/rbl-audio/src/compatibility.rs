@@ -82,6 +82,9 @@ pub fn needs_conversion(path: &Path) -> Result<bool> {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AudioProperties {
+    /// M4A codec classification: 4 AAC, 6 ALAC, 0 unknown. None is an old probe/non-M4A.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mp4_file_type: Option<u16>,
     pub compatible: bool,
     pub sample_rate: Option<u32>,
     pub bit_depth: Option<u32>,
@@ -108,7 +111,12 @@ pub fn inspect(path: &Path) -> Result<AudioProperties> {
         }
         _ => false,
     };
-    Ok(AudioProperties { compatible: codec_ok
+    let mp4_file_type = (ext == "m4a").then_some(match p.codec {
+        symphonia::core::codecs::CODEC_TYPE_ALAC => 6,
+        symphonia::core::codecs::CODEC_TYPE_AAC => 4,
+        _ => 0,
+    });
+    Ok(AudioProperties { mp4_file_type, compatible: codec_ok
         && matches!(p.sample_rate, Some(44_100 | 48_000))
         && p.channels.is_some_and(|c| matches!(c.count(), 1 | 2)),
         sample_rate: p.sample_rate, bit_depth: p.bits_per_sample,
