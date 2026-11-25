@@ -420,9 +420,39 @@ impl Pdb<'_> {
         self.table(PageType::Other(11)).map(|t| self.simple_named(t, 0, 4)).unwrap_or_default()
     }
     pub fn played_history_entries(&self) -> Vec<PlaylistEntry> {
-        self.table(PageType::Other(12)).map(|t| self.rows(t).into_iter().map(|r| PlaylistEntry {
+        let mut entries: Vec<_> = self.table(PageType::Other(12)).map(|t| self.rows(t).into_iter().map(|r| PlaylistEntry {
             track_id: self.u4_at(r,0), playlist_id: self.u4_at(r,4), entry_index: self.u4_at(r,8),
-        }).collect()).unwrap_or_default()
+        }).collect()).unwrap_or_default();
+        // SEQ is INT16 at 0x08; ONAIR at 0x0a is not part of the order.
+        // Earlier RBXport writers used the entire word. Only an oversized
+        // history with the complete unique raw sequence 1..N establishes
+        // that old representation. An identical stock byte pattern cannot
+        // be distinguished; partial/ambiguous sequences use the normal field.
+        let mut wide = BTreeMap::new();
+        if entries.len() > usize::from(u16::MAX) {
+            let mut counts = BTreeMap::<u32, usize>::new();
+            for entry in &entries { *counts.entry(entry.playlist_id).or_default() += 1; }
+            for (id, count) in counts {
+                if count > usize::from(u16::MAX) && u32::try_from(count).is_ok() {
+                    wide.insert(id, (vec![false; count], true));
+                }
+            }
+            for entry in &entries {
+                let Some((seen, valid)) = wide.get_mut(&entry.playlist_id) else { continue };
+                if !*valid { continue; }
+                let index = entry.entry_index.checked_sub(1).and_then(|n| usize::try_from(n).ok());
+                match index.and_then(|i| seen.get_mut(i)) {
+                    Some(slot) if !*slot => *slot = true,
+                    _ => *valid = false,
+                }
+            }
+        }
+        for entry in &mut entries {
+            if !wide.get(&entry.playlist_id).is_some_and(|(_, valid)| *valid) {
+                entry.entry_index &= u32::from(u16::MAX);
+            }
+        }
+        entries
     }
 
     /// Decodes a name table, dispatching on its layout.
