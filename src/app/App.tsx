@@ -1330,9 +1330,11 @@ function AppBody() {
           noteSkips(skipped);
           report(signal.aborted
             ? `Stopped: ${noun(added)} added to ${name}${left}${already}.`
-            : added === 0 && toAdd.length > 0
-              ? `Already in ${name}${left}${already}.`
-              : `Added ${noun(added)} to ${name}${left}${already}.`);
+            : allowDuplicates === null
+              ? `Nothing added to ${name}${left}${already}.`
+              : added === 0 && toAdd.length > 0
+                ? `Already in ${name}${left}${already}.`
+                : `Added ${noun(added)} to ${name}${left}${already}.`);
         },
       });
     },
