@@ -1805,5 +1805,6 @@
   "Display All Missing Files opens all missing collection files in the main window and stops this sync.": "Display All Missing Files opens all missing collection files in the main window and stops this sync.",
   "A track can have at most 10 memory cues or loops.": "A track can have at most 10 memory cues or loops.",
   "Hot Cue {letter} has been set since": "Hot Cue {letter} has been set since",
-  "The track list changed. Start the drag again.": "The track list changed. Start the drag again."
+  "The track list changed. Start the drag again.": "The track list changed. Start the drag again.",
+  "The Device Library menu settings could not be updated safely; its settings were left unchanged.": "The Device Library menu settings could not be updated safely; its settings were left unchanged."
 }

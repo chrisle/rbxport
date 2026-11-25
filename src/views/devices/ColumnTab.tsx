@@ -34,7 +34,7 @@ export function ColumnTab({ settings, onChange }: ColumnTabProps) {
         className={styles.columnSelect}
         aria-label="Default right column"
         value={settings.subColumn ?? ""}
-        disabled={!settings.hasLibrarySettings}
+        disabled={!settings.hasMenuSettings}
         onChange={(e) => {
           const value = e.target.value;
           onChange({ ...settings, subColumn: value === "" ? null : Number(value) });

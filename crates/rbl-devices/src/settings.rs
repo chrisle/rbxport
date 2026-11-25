@@ -256,6 +256,8 @@ pub struct DeviceSettings {
     pub dev: Option<DevSetting>,
     /// `exportLibrary.db`'s settings, or `None` when the stick has none.
     pub library: Option<StickSettings>,
+    /// Menu-only ownership when the SQL library is genuinely absent.
+    pub legacy_menus: Option<rbl_export::DeviceMenus>,
     /// "Background Color : Device Library": byte 9 of `export.pdb`'s
     /// `property` row, 0 Default to 8 Purple. `None` when the stick has no
     /// `export.pdb` or the row cannot be read.
@@ -272,6 +274,8 @@ pub enum SettingsError {
     Io(#[from] std::io::Error),
     #[error("could not update exportLibrary.db: {0}")]
     Library(#[from] rbl_onelibrary::Error),
+    #[error("The Device Library menu settings could not be updated safely; its settings were left unchanged.")]
+    Menus,
 }
 
 /// Reads what the stick holds. Never fails: a file that is missing or
@@ -283,12 +287,22 @@ pub fn read(mount_point: &Path) -> DeviceSettings {
         return DeviceSettings {
             dev: None,
             library: None,
+            legacy_menus: None,
             device_library_background: None,
             has_device_library: false,
             has_one_library: false,
         };
     }
     read_files(mount_point)
+}
+
+// New legacy writes require plain descendants of the selected mount. The
+// mount itself may be an OS alias, but no internal library path may redirect.
+fn plain_legacy(root: &Path) -> bool {
+    [root.to_path_buf(), root.join("rekordbox")].iter().all(|path|
+        std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_dir()))
+        && std::fs::symlink_metadata(root.join("rekordbox/export.pdb"))
+            .is_ok_and(|meta| meta.file_type().is_file())
 }
 
 fn read_files(mount_point: &Path) -> DeviceSettings {
@@ -315,7 +329,11 @@ fn read_files(mount_point: &Path) -> DeviceSettings {
     } else {
         None
     };
-    DeviceSettings { dev, library, device_library_background, has_device_library, has_one_library }
+    let legacy_menus = if plain_legacy(&root) && std::fs::symlink_metadata(&library_path)
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+        std::fs::read(&pdb_path).ok().and_then(|bytes| rbl_export::read_device_menus(&bytes).ok().flatten())
+    } else { None };
+    DeviceSettings { dev, library, legacy_menus, device_library_background, has_device_library, has_one_library }
 }
 
 /// Writes the settings back.
@@ -356,7 +374,8 @@ fn write_changes_recovered(
         .is_some_and(|next| current.library.as_ref() != Some(next));
     let background_changed = settings.device_library_background.is_some()
         && settings.device_library_background != current.device_library_background;
-    if !dev_changed && !library_changed && !background_changed {
+    let menus_changed = settings.legacy_menus.as_ref().is_some_and(|next| current.legacy_menus.as_ref() != Some(next));
+    if !dev_changed && !library_changed && !background_changed && !menus_changed {
         return Ok(());
     }
 
@@ -364,6 +383,35 @@ fn write_changes_recovered(
     let publication = rbl_core::durable::Publication::new(mount_point, ".rbxport-publication")?;
     let relative = root.strip_prefix(mount_point).map_err(std::io::Error::other)?;
     let staged_root = publication.stage().join(relative);
+    // Plan every requested legacy table before staging any settings group.
+    // A failed second replacement cannot publish the first or DEVSETTING.
+    let legacy_pdb = if menus_changed {
+        let path = root.join("rekordbox/export.pdb");
+        if !std::fs::symlink_metadata(root.join("rekordbox/exportLibrary.db"))
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+            return Err(SettingsError::Menus);
+        }
+        if !plain_legacy(&root) { return Err(SettingsError::Menus); }
+        let mut bytes = std::fs::read(&path)?;
+        let owned = rbl_export::read_device_menus(&bytes).map_err(|_| SettingsError::Menus)?;
+        if owned != current.legacy_menus { return Err(SettingsError::Menus); }
+        let menus = settings.legacy_menus.as_ref().ok_or(SettingsError::Menus)?;
+        menus.validate_change(owned.as_ref().ok_or(SettingsError::Menus)?).map_err(|_| SettingsError::Menus)?;
+        let menu_settings = StickSettings { categories: menus.categories.clone(), sorts: menus.sorts.clone(),
+            sub_column: menus.sub_column, ..StickSettings::default() };
+        let (categories, sorts) = rbl_export::menu_rows(&menu_settings);
+        for (kind, rows) in [(17, categories), (18, sorts)] {
+            bytes = rbl_pdb::build::replace_single_page_table(&bytes, kind, &rows).ok_or(SettingsError::Menus)?;
+        }
+        if background_changed {
+            let current = rbl_pdb::Pdb::parse(&bytes).ok().and_then(|pdb| pdb.property()).ok_or(SettingsError::Menus)?;
+            let mut property = current;
+            property.background_color = settings.device_library_background.ok_or(SettingsError::Menus)?;
+            let row = rbl_pdb::rows::property_row(&property).ok_or(SettingsError::Menus)?;
+            bytes = rbl_pdb::build::replace_single_page_table(&bytes, 19, &[row]).ok_or(SettingsError::Menus)?;
+        }
+        Some(bytes)
+    } else { None };
     rbl_core::durable::create_dir_all(staged_root.join("rekordbox"))?;
     let mut files = Vec::new();
     if dev_changed {
@@ -385,7 +433,10 @@ fn write_changes_recovered(
             }
         }
     }
-    if library_changed || background_changed {
+    if let Some(bytes) = legacy_pdb {
+        rbl_core::durable::write(&staged_root.join("rekordbox/export.pdb"), &bytes)?;
+        files.push(relative.join("rekordbox/export.pdb"));
+    } else if library_changed || background_changed {
         let pdb_path = root.join("rekordbox/export.pdb");
         if let Ok(bytes) = std::fs::read(&pdb_path) {
             let next = updated_pdb(&bytes, library_changed.then_some(settings.library.as_ref()).flatten(), settings.device_library_background);
@@ -552,6 +603,7 @@ mod tests {
         let current = DeviceSettings {
             dev: Some(DevSetting::default()),
             library: Some(StickSettings::default()),
+            legacy_menus: None,
             device_library_background: None,
             has_device_library: true,
             has_one_library: true,

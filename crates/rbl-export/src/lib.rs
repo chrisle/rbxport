@@ -25,6 +25,7 @@ pub mod snapshot;
 mod playlist_order;
 mod prepared_audio;
 mod legacy_menus;
+pub use legacy_menus::{DeviceMenus, read_owned as read_device_menus};
 mod reconcile;
 mod verification;
 

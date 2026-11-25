@@ -1041,6 +1041,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       hasDeviceLibrary: true,
       hasOneLibrary: true,
       hasLibrarySettings: true,
+      hasMenuSettings: true,
       deviceName: settings.deviceName || "RBXPORT",
     });
     const names = playlistIds.map((id) => findNode(id)?.name ?? id);
@@ -3634,6 +3635,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         hasDeviceLibrary: true,
         hasOneLibrary: true,
         hasLibrarySettings: true,
+        hasMenuSettings: true,
         hasDevSetting: true,
         deviceLibraryBackgroundColorType: current.deviceLibraryBackgroundColorType ?? 0,
         waveformColor: defaults?.waveformColor ?? current.waveformColor,
@@ -3654,12 +3656,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     writeDeviceDefaults: (path) => wait(copySettings(settingsOf(path))),
     saveDeviceSettings: (path, settings) => {
       const current = settingsOf(path);
-      // A stick without a library keeps its reference rows: nothing to
-      // write them into, as the real backend also refuses.
+      // Only owned menus can change without a OneLibrary settings owner.
       const next: DeviceSettings = current.hasLibrarySettings
         ? { ...copySettings(settings), hasDevSetting: true }
         : {
             ...current,
+            ...(current.hasMenuSettings ? { categories: settings.categories, sorts: settings.sorts, subColumn: settings.subColumn } : {}),
             hasDevSetting: true,
             waveformColor: settings.waveformColor,
             waveformPosition: settings.waveformPosition,

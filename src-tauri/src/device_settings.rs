@@ -36,7 +36,7 @@ pub struct ColorNameDto {
 /// sorts, 8 colours.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-// Four presence flags for four optional files; a wire struct, not a state machine.
+// Presence/capability flags describe optional device files, not a state machine.
 #[allow(clippy::struct_excessive_bools)]
 pub struct DeviceSettingsDto {
     /// Whether `export.pdb` is on the stick — "Device Library".
@@ -57,6 +57,9 @@ pub struct DeviceSettingsDto {
     /// Whether the library settings below were read; when false the stick
     /// has no `exportLibrary.db` and they are not written.
     pub has_library_settings: bool,
+    /// Category, sort and column rows can be written without a SQL library.
+    #[serde(default)]
+    pub has_menu_settings: bool,
     pub device_name: String,
     /// "Background Color : `OneLibrary`": `property.backGroundColorType`,
     /// 0 Default, 1 Pink .. 8 Purple.
@@ -95,6 +98,7 @@ pub fn to_dto(settings: &DeviceSettings) -> DeviceSettingsDto {
     let dev = settings.dev.as_ref().unwrap_or(&default_dev);
     let default_library = StickSettings::default();
     let library = settings.library.as_ref().unwrap_or(&default_library);
+    let menus = settings.legacy_menus.as_ref().filter(|_| settings.library.is_none());
     DeviceSettingsDto {
         has_device_library: settings.has_device_library,
         has_one_library: settings.has_one_library,
@@ -121,12 +125,13 @@ pub fn to_dto(settings: &DeviceSettings) -> DeviceSettingsDto {
         }
         .to_owned(),
         has_library_settings: settings.library.is_some(),
+        has_menu_settings: settings.library.is_some() || settings.legacy_menus.is_some(),
         device_name: library.device_name.clone(),
         background_color_type: library.background_color_type,
         device_library_background_color_type: settings.device_library_background.map(i64::from),
-        categories: library.categories.iter().map(slot_dto).collect(),
-        sorts: library.sorts.iter().map(slot_dto).collect(),
-        sub_column: library.sub_column,
+        categories: menus.map_or(&library.categories, |m| &m.categories).iter().map(slot_dto).collect(),
+        sorts: menus.map_or(&library.sorts, |m| &m.sorts).iter().map(slot_dto).collect(),
+        sub_column: menus.map_or(library.sub_column, |m| m.sub_column),
         colors: library
             .colors
             .iter()
@@ -184,6 +189,19 @@ pub fn apply(current: &DeviceSettings, dto: &DeviceSettingsDto) -> AppResult<Dev
         }),
         None => None,
     };
+    let legacy_menus = match current.legacy_menus.as_ref().filter(|_| current.library.is_none()) {
+        Some(existing) => {
+            let next = rbl_export::DeviceMenus {
+                categories: dto.categories.iter().map(slot_from).collect(),
+                sorts: dto.sorts.iter().map(slot_from).collect(),
+                sub_column: dto.sub_column,
+            };
+            next.validate_change(existing).map_err(|_| AppError::new(ErrorKind::Malformed, rbl_devices::settings::SettingsError::Menus.to_string()))?;
+            Some(next)
+        }
+        None if dto.has_menu_settings && current.library.is_none() => return Err(AppError::new(ErrorKind::Malformed, rbl_devices::settings::SettingsError::Menus.to_string())),
+        None => None,
+    };
     // Only a stick whose `export.pdb` has a `property` row can hold it.
     let device_library_background =
         match (current.device_library_background, dto.device_library_background_color_type) {
@@ -198,6 +216,7 @@ pub fn apply(current: &DeviceSettings, dto: &DeviceSettingsDto) -> AppResult<Dev
     Ok(DeviceSettings {
         dev: Some(dev),
         library,
+        legacy_menus,
         device_library_background,
         has_device_library: current.has_device_library,
         has_one_library: current.has_one_library,
@@ -304,7 +323,7 @@ pub fn write_dev_defaults(mount: &Path, dto: &StickDefaultsDto) -> AppResult<()>
     if current.dev.is_some() {
         return Ok(());
     }
-    let next = DeviceSettings { dev: Some(dev_defaults(dto)?), library: None, ..current };
+    let next = DeviceSettings { dev: Some(dev_defaults(dto)?), library: None, ..current.clone() };
     rbl_devices::settings::write_changes(mount, &current, &next)
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))
 }
@@ -417,6 +436,7 @@ mod tests {
         let empty = DeviceSettings {
             dev: None,
             library: None,
+            legacy_menus: None,
             device_library_background: None,
             has_device_library: false,
             has_one_library: false,
@@ -442,6 +462,7 @@ mod tests {
         let stick = DeviceSettings {
             dev: Some(DevSetting::default()),
             library: Some(StickSettings::default()),
+            legacy_menus: None,
             device_library_background: Some(0),
             has_device_library: true,
             has_one_library: true,
@@ -474,6 +495,7 @@ mod tests {
         let stick = DeviceSettings {
             dev: None,
             library: None,
+            legacy_menus: None,
             device_library_background: None,
             has_device_library: false,
             has_one_library: false,
@@ -488,6 +510,7 @@ mod tests {
         let stick = DeviceSettings {
             dev: None,
             library: Some(StickSettings { background_color_type: 12, ..StickSettings::default() }),
+            legacy_menus: None,
             device_library_background: Some(0),
             has_device_library: true,
             has_one_library: true,
@@ -559,4 +582,112 @@ mod tests {
         bad.key_display = "roman".to_owned();
         assert!(dev_defaults(&bad).is_err());
     }
+
+    #[test]
+    fn legacy_only_menus_are_read_and_saved_by_the_normal_command() {
+        let root = tempfile::tempdir().unwrap();
+        let defaults = StickSettings { sub_column: Some(21), ..StickSettings::default() };
+        rbl_export::create_library(root.path(), Some(&defaults), &[], None).unwrap();
+        let sql = root.path().join("PIONEER/rekordbox/exportLibrary.db");
+        std::fs::remove_file(&sql).unwrap();
+        let path = root.path().to_string_lossy().into_owned();
+        let mut dto = tauri::async_runtime::block_on(device_settings(path.clone())).unwrap();
+        assert!(!dto.has_one_library && !dto.has_library_settings);
+        assert_eq!(dto.sub_column, Some(21));
+        assert!(dto.has_menu_settings);
+        let pdb = root.path().join("PIONEER/rekordbox/export.pdb");
+        let before = std::fs::read(&pdb).unwrap();
+        let property = rbl_pdb::Pdb::parse(&before).unwrap().property();
+        dto.sub_column = Some(5);
+        let category_seq = i64::try_from(dto.categories.iter().filter(|slot| slot.visible).count()).unwrap() + 1;
+        let category = dto.categories.iter_mut().find(|slot| !slot.visible).unwrap();
+        category.visible = true; category.seq = category_seq;
+        let sort_seq = i64::try_from(dto.sorts.iter().filter(|slot| slot.visible).count()).unwrap() + 1;
+        let sort = dto.sorts.iter_mut().find(|slot| !slot.visible).unwrap();
+        sort.visible = true; sort.seq = sort_seq;
+        let ordered = |slots: &[MenuSlotDto]| { let mut values: Vec<_> = slots.iter().map(|s| (s.id, s.menu_item, s.seq, s.visible)).collect(); values.sort_unstable(); values };
+        let expected_categories = ordered(&dto.categories);
+        let expected_sorts = ordered(&dto.sorts);
+        let saved = tauri::async_runtime::block_on(save_device_settings(path.clone(), dto)).unwrap();
+        assert_eq!(saved.sub_column, Some(5));
+        assert_eq!(ordered(&saved.categories), expected_categories);
+        assert_eq!(ordered(&saved.sorts), expected_sorts);
+        let after = std::fs::read(&pdb).unwrap();
+        assert_eq!(rbl_pdb::Pdb::parse(&after).unwrap().property(), property);
+        for (before, after) in before.chunks_exact(4096).zip(after.chunks_exact(4096)).skip(1) {
+            let kind = u32::from_le_bytes(before[8..12].try_into().unwrap());
+            if kind != 17 && kind != 18 { assert_eq!(after, before, "unowned page type {kind}"); }
+        }
+        assert!(!saved.has_one_library && !saved.has_library_settings && !sql.exists());
+        assert_eq!(tauri::async_runtime::block_on(device_settings(path)).unwrap().sub_column, Some(5));
+    }
+
+    #[test]
+    fn unreplaceable_requested_legacy_tables_refuse_all_settings_changes() {
+        for fragmented in [17, 18] {
+            let root = tempfile::tempdir().unwrap();
+            rbl_export::create_library(root.path(), None, &[], None).unwrap();
+            let path = root.path().to_string_lossy().into_owned();
+            let mut value = serde_json::to_value(tauri::async_runtime::block_on(device_settings(path.clone())).unwrap()).unwrap();
+            value["hasMenuSettings"] = true.into();
+            value["subColumn"] = 5.into();
+            value["waveformColor"] = "3band".into();
+            let requested: DeviceSettingsDto = serde_json::from_value(value).unwrap();
+            let (categories, sorts) = rbl_export::menu_rows(&StickSettings::default());
+            let mut file = rbl_pdb::build::FileBuilder::new(4096);
+            for (kind, mut rows) in [(17, categories), (18, sorts)] {
+                if kind == fragmented { for row in &mut rows { row.resize(4008, 0); } }
+                file.add_table(kind, &rows);
+            }
+            let pdb = root.path().join("PIONEER/rekordbox/export.pdb");
+            std::fs::write(&pdb, file.finish()).unwrap();
+            std::fs::remove_file(root.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+            let before = std::fs::read(&pdb).unwrap();
+            let dev = root.path().join("PIONEER/DEVSETTING.DAT");
+            let dev_before = std::fs::read(&dev).ok();
+            assert!(tauri::async_runtime::block_on(save_device_settings(path, requested)).is_err(), "table {fragmented}");
+            assert_eq!(std::fs::read(&pdb).unwrap(), before);
+            assert_eq!(std::fs::read(&dev).ok(), dev_before);
+            assert!(!root.path().join("PIONEER/rekordbox/exportLibrary.db").exists());
+        }
+    }
+
+    #[test]
+    fn legacy_menu_capability_never_borrows_from_an_unreadable_present_sql_library() {
+        let root = tempfile::tempdir().unwrap();
+        rbl_export::create_library(root.path(), None, &[], None).unwrap();
+        let sql = root.path().join("PIONEER/rekordbox/exportLibrary.db");
+        std::fs::write(&sql, b"not a supported library").unwrap();
+        let dto = to_dto(&rbl_devices::settings::read(root.path()));
+        assert!(!dto.has_menu_settings && !dto.has_library_settings);
+        std::fs::remove_file(&sql).unwrap();
+        std::fs::create_dir(&sql).unwrap();
+        assert!(!to_dto(&rbl_devices::settings::read(root.path())).has_menu_settings);
+    }
+
+    #[test]
+    fn malformed_requested_legacy_menus_refuse_before_any_publication() {
+        for invalid in 0..4 {
+            let root = tempfile::tempdir().unwrap();
+            rbl_export::create_library(root.path(), None, &[], None).unwrap();
+            std::fs::remove_file(root.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+            let path = root.path().to_string_lossy().into_owned();
+            let mut dto = tauri::async_runtime::block_on(device_settings(path.clone())).unwrap();
+            match invalid {
+                0 => dto.categories.push(dto.categories[0].clone()),
+                1 => dto.sorts[0].menu_item = 999,
+                2 => dto.sub_column = Some(999),
+                _ => dto.sorts[0].seq = 999,
+            }
+            dto.waveform_color = "3band".into();
+            let pdb = root.path().join("PIONEER/rekordbox/export.pdb");
+            let before = std::fs::read(&pdb).unwrap();
+            let dev = root.path().join("PIONEER/DEVSETTING.DAT");
+            let dev_before = std::fs::read(&dev).ok();
+            assert!(tauri::async_runtime::block_on(save_device_settings(path, dto)).is_err());
+            assert_eq!(std::fs::read(&pdb).unwrap(), before);
+            assert_eq!(std::fs::read(&dev).ok(), dev_before);
+        }
+    }
+
 }

@@ -11,7 +11,7 @@
  * write resolves to what the stick now holds, which is what is shown, so a
  * write that did not take cannot leave the panel claiming it did.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { Device, DeviceSettings, TreeNode } from "@/ipc/types";
@@ -68,6 +68,12 @@ export function DevicePanel({
   // an export on its own leaves the stick without.
   const stickDefaults = usePreferences().djSystem;
   const hasExport = device.export !== null;
+  const owner = useMemo(() => ({ path: device.path, exportStamp, hasExport, version: 0, confirmed: null as DeviceSettings | null, tail: Promise.resolve() }), [device.path, exportStamp, hasExport]);
+  const active = useRef<typeof owner | null>(null);
+  useLayoutEffect(() => {
+    active.current = owner;
+    return () => { if (active.current === owner) active.current = null; };
+  }, [owner]);
   useEffect(() => {
     let cancelled = false;
     setSettings(null);
@@ -75,14 +81,14 @@ export function DevicePanel({
       .then(async (backend) => {
         const read = await backend.deviceSettings(device.path);
         // A stick with an export but no DEVSETTING.DAT gets the defaults.
-        if (read.hasDevSetting || !hasExport) return read;
+        if (cancelled || active.current !== owner || read.hasDevSetting || !hasExport) return read;
         return backend.writeDeviceDefaults(device.path, stickDefaults);
       })
       .then((read) => {
-        if (!cancelled) setSettings(read);
+        if (!cancelled && active.current === owner) { owner.confirmed = read; setSettings(read); }
       })
       .catch((e: unknown) => {
-        if (!cancelled) onError?.(errorMessage(e));
+        if (!cancelled && active.current === owner) onError?.(errorMessage(e));
       });
     return () => {
       cancelled = true;
@@ -91,20 +97,31 @@ export function DevicePanel({
     // read again only when the device or its export changes. A preference
     // changed while the panel is open is for the next stick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.path, exportStamp, hasExport, onError]);
+  }, [device.path, exportStamp, hasExport, onError, owner]);
 
   // Every change is written at once and the panel shows what came back.
   const save = useCallback(
     (next: DeviceSettings) => {
+      if (active.current !== owner || owner.confirmed === null) return;
+      const version = ++owner.version;
       setSettings(next);
-      void getBackend()
-        .then((backend) => backend.saveDeviceSettings(device.path, next))
-        .then(setSettings)
-        .catch((e: unknown) => {
-          onError?.(errorMessage(e));
-        });
+      const current = () => active.current === owner && owner.version === version;
+      owner.tail = owner.tail.then(async () => {
+        try {
+          const backend = await getBackend();
+          if (active.current !== owner) return;
+          const saved = await backend.saveDeviceSettings(device.path, next);
+          owner.confirmed = saved;
+          if (current()) setSettings(saved);
+        } catch (e: unknown) {
+          if (current()) {
+            setSettings(owner.confirmed);
+            onError?.(errorMessage(e));
+          }
+        }
+      });
     },
-    [device.path, onError],
+    [device.path, onError, owner],
   );
 
   return (
@@ -147,14 +164,14 @@ export function DevicePanel({
           <ListPairTab
             kind="category"
             slots={settings.categories}
-            disabled={!settings.hasLibrarySettings}
+            disabled={!settings.hasMenuSettings}
             onChange={(categories) => save({ ...settings, categories })}
           />
         ) : tab === "sort" ? (
           <ListPairTab
             kind="sort"
             slots={settings.sorts}
-            disabled={!settings.hasLibrarySettings}
+            disabled={!settings.hasMenuSettings}
             onChange={(sorts) => save({ ...settings, sorts })}
           />
         ) : tab === "column" ? (

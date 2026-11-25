@@ -2447,6 +2447,7 @@ export interface DeviceSettings {
   keyDisplay: KeyDisplay;
   /** The library rows were read; when false they are the reference rows and are not written. */
   hasLibrarySettings: boolean;
+  hasMenuSettings: boolean;
   deviceName: string;
   /** Background Color : OneLibrary — `property.backGroundColorType`, 0 Default, 1 Pink … 8 Purple. */
   backgroundColorType: number;

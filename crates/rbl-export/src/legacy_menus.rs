@@ -86,9 +86,12 @@ fn decode(rows: &[&[u8]], category: bool) -> Result<(Vec<MenuSlot>, Option<i64>)
 
 pub(crate) fn read(path: &Path, defaults: Option<&StickSettings>) -> Result<Option<StickSettings>> {
     if !path.try_exists()? { return Ok(None); }
-    let bytes = std::fs::read(path)?;
-    let pdb = Pdb::parse(&bytes).map_err(|_| invalid())?;
-    let tables = usize::try_from(u32_at(&bytes, 8)).map_err(|_| invalid())?;
+    read_bytes(&std::fs::read(path)?, defaults)
+}
+
+fn read_bytes(bytes: &[u8], defaults: Option<&StickSettings>) -> Result<Option<StickSettings>> {
+    let pdb = Pdb::parse(bytes).map_err(|_| invalid())?;
+    let tables = usize::try_from(u32_at(bytes, 8)).map_err(|_| invalid())?;
     if tables != pdb.tables.len() { return Err(invalid()); }
     let find = |kind| {
         let mut tables = pdb.tables.iter().filter(|table| table.page_type == kind);
@@ -103,8 +106,8 @@ pub(crate) fn read(path: &Path, defaults: Option<&StickSettings>) -> Result<Opti
         (Some(category), Some(sort)) => (category, sort),
         _ => return Err(invalid()),
     };
-    let (categories, _) = decode(&rows(&pdb, &bytes, category)?, true)?;
-    let (sorts, sub_column) = decode(&rows(&pdb, &bytes, sort)?, false)?;
+    let (categories, _) = decode(&rows(&pdb, bytes, category)?, true)?;
+    let (sorts, sub_column) = decode(&rows(&pdb, bytes, sort)?, false)?;
     if categories.is_empty() || sorts.is_empty() { return Err(invalid()); }
     // Names, colours and background retain their existing ownership rules.
     let mut settings = defaults.cloned().unwrap_or_default();
@@ -112,4 +115,38 @@ pub(crate) fn read(path: &Path, defaults: Option<&StickSettings>) -> Result<Opti
     settings.sorts = sorts;
     settings.sub_column = sub_column;
     Ok(Some(settings))
+}
+
+/// Only the settings owned by Device Library category and sort tables.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceMenus {
+    pub categories: Vec<MenuSlot>,
+    pub sorts: Vec<MenuSlot>,
+    pub sub_column: Option<i64>,
+}
+
+/// Decode owned menu rows from one snapshot, without granting ownership of names or colours.
+pub fn read_owned(bytes: &[u8]) -> Result<Option<DeviceMenus>> {
+    Ok(read_bytes(bytes, None)?.map(|settings| DeviceMenus {
+        categories: settings.categories, sorts: settings.sorts, sub_column: settings.sub_column,
+    }))
+}
+
+impl DeviceMenus {
+    /// Preserve the existing owned rows; only their visibility/order and selected
+    /// sub-column may change. Check before the serializer can clamp/filter rows.
+    pub fn validate_change(&self, previous: &Self) -> Result<()> {
+        for (next, old, max) in [(&self.categories, &previous.categories, i64::from(u16::MAX)), (&self.sorts, &previous.sorts, i64::from(u8::MAX))] {
+            if next.len() != old.len() { return Err(invalid()); }
+            let mut ids = BTreeSet::new();
+            let mut positions = BTreeSet::new();
+            for slot in next {
+                if !ids.insert(slot.id) || !old.iter().any(|known| known.id == slot.id && known.menu_item == slot.menu_item && known.name == slot.name)
+                    || (slot.visible && (slot.seq <= 0 || slot.seq > max || !positions.insert(slot.seq)))
+                    || (!slot.visible && slot.seq != 0) { return Err(invalid()); }
+            }
+        }
+        if self.sub_column.is_some_and(|item| !self.sorts.iter().any(|slot| slot.menu_item == item)) { return Err(invalid()); }
+        Ok(())
+    }
 }

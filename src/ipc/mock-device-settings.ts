@@ -79,6 +79,7 @@ export function referenceDeviceSettings(deviceName: string, withLibrary: boolean
     overviewWaveform: "half",
     keyDisplay: "classic",
     hasLibrarySettings: withLibrary,
+    hasMenuSettings: withLibrary,
     deviceName: withLibrary ? deviceName : "",
     backgroundColorType: 0,
     deviceLibraryBackgroundColorType: withLibrary ? 0 : null,
