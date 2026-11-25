@@ -1539,6 +1539,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (kind !== "memory" && !/^[A-P]$/.test(kind.hot)) {
         return refuse(`${JSON.stringify(kind.hot)} is not a hot cue slot rekordbox has`);
       }
+      if (kind !== "memory" && cuesOf(track).some(cue => !cue.memory && cue.letter === kind.hot)) {
+        return failed("conflict", `Hot Cue ${kind.hot} has been set since`);
+      }
       const id = `cue-${nextCueId++}`;
       cuesOf(track).push({
         id, positionMs, outMs: 0, letter: kind === "memory" ? "" : kind.hot, memory: kind === "memory",
@@ -1549,6 +1552,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     addLoop: (track, kind, inMs, outMs) => {
       if (!all.some((r) => r.id === track)) return refuse(`no track ${track}`);
       if (outMs <= inMs) return refuse("a loop has to end after it starts");
+      if (kind !== "memory" && cuesOf(track).some(cue => !cue.memory && cue.letter === kind.hot)) {
+        return failed("conflict", `Hot Cue ${kind.hot} has been set since`);
+      }
       const id = `cue-${nextCueId++}`;
       cuesOf(track).push({
         id, positionMs: inMs, outMs, letter: kind === "memory" ? "" : kind.hot, memory: kind === "memory",

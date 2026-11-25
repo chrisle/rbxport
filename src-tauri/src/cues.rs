@@ -235,6 +235,28 @@ pub fn apply_recorded(writer: &mut rbl_db::write::Writer, edit: CueEdit) -> AppR
         | CueEdit::Delete { cue } => owner_of(writer, cue)?,
     };
     let before = writer.cue_rows(&track).map_err(write_error)?;
+    // The pad may still look empty while its prior write's cue refetch is
+    // pending. A normal add never replaces an occupied hot slot. Explicit
+    // moves/player persistence/imports retain their separate writer contracts.
+    let hot = match &edit {
+        CueEdit::Add { kind: CueKind::Hot(letter), .. } => Some(*letter),
+        CueEdit::AddLoop { kind: CueKind::Hot(letter), in_ms, out_ms, beat_loop, .. }
+            if out_ms > in_ms && !beat_loop.is_some_and(|(n, d)| n == 0 || d == 0) => Some(*letter),
+        _ => None,
+    };
+    if let Some(letter) = hot {
+        let kind = CueKind::Hot(letter).number()?;
+        if before.iter().any(|row| row.hot_kind() == Some(kind)) {
+            // Retain the writer's existing refusal for an orphan/deleted owner.
+            let live: bool = writer.library().connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0)",
+                [&track], |row| row.get(0),
+            ).map_err(|error| write_error(error.into()))?;
+            if live {
+                return Err(AppError::new(ErrorKind::Conflict, format!("Hot Cue {letter} has been set since")));
+            }
+        }
+    }
     if let Some(addition) = memory_addition(&before, &edit) {
         // A no-op must not waive add_cue's existing live-track requirement.
         // New additions retain the writer's normal owner check unchanged.
@@ -1019,3 +1041,7 @@ mod tests {
         assert_eq!(conversion_plan(&[cue(1, 1, 0, 0)]), [] as [(char, u32, u32); 0]);
     }
 }
+
+#[cfg(test)]
+#[path = "cue_hot_slots_tests.rs"]
+mod hot_slots_tests;

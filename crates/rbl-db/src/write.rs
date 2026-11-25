@@ -916,6 +916,18 @@ impl CueRow {
         }
     }
 
+    /// A live hot cue's canonical Kind, using the same numeric decoding as
+    /// the index. Deleted rows and memory/unsupported kinds hold no pad.
+    pub fn hot_kind(&self) -> Option<u8> {
+        if !matches!(self.column("rb_local_deleted"), Some(Value::Integer(0))) {
+            return None;
+        }
+        let kind = u8::try_from(crate::details::number_value(
+            self.column("Kind").unwrap_or(&Value::Null),
+        )).unwrap_or(0);
+        HOT_CUE_SLOTS.contains(&i64::from(kind)).then_some(kind)
+    }
+
     /// A live memory row's ID and canonical millisecond points. Negative,
     /// NULL and unrepresentable points read as zero, as the cue display does;
     /// the snapshot's stored values are never changed by this interpretation.
