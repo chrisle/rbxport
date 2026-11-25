@@ -60,7 +60,9 @@ async function load(trackId: string, kind: WaveformKind): Promise<Uint8Array> {
     try {
       const backend = await getBackend();
       const data = await backend.trackWaveform(trackId, kind);
-      if (current()) bytesByTrack.set(key, data);
+      // A missing companion/tag is an empty success. Do not keep that miss
+      // across a later mount after the analysis files become available.
+      if (current() && data.length > 0) bytesByTrack.set(key, data);
       return data;
     } catch {
       // A track without analysis simply stays blank.

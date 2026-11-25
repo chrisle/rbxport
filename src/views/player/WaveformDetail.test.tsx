@@ -292,3 +292,78 @@ describe("a waveform being drawn by an analysis", () => {
     );
   });
 });
+
+
+it.each(["empty", "rejected", "valid"] as const)("waveform remount recovery: %s first read", async (first) => {
+  const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
+  const read = vi.fn().mockResolvedValue(bytes);
+  if (first === "empty") read.mockResolvedValueOnce(new Uint8Array());
+  else if (first === "rejected") read.mockRejectedValueOnce(new Error("temporary read failure"));
+  __setBackend({ trackWaveform: read, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+  const show = () => act(() => root.render(<WaveformDetail trackId={`generated-recovery-${first}`} progress={0.5} span={1} width={400} height={80} detail />));
+  show();
+  await settle();
+  expect(read).toHaveBeenCalledTimes(1);
+  act(() => root.render(null));
+  show();
+  await settle();
+  expect(read).toHaveBeenCalledTimes(first === "valid" ? 1 : 2);
+  expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+});
+
+it("keeps an unavailable waveform blank without retrying on ordinary renders", async () => {
+  const read = vi.fn().mockResolvedValue(new Uint8Array());
+  __setBackend({ trackWaveform: read, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+  const show = (progress: number) => act(() => root.render(<WaveformDetail trackId="generated-still-missing" progress={progress} span={1} width={400} height={80} detail />));
+  show(0.5);
+  await settle();
+  show(0.6);
+  await settle();
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(drawn.wave).not.toHaveBeenCalled();
+});
+
+it("shares a pending waveform read across a remount", async () => {
+  const pending = deferred<Uint8Array>();
+  const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
+  const read = vi.fn(() => pending.promise);
+  __setBackend({ trackWaveform: read, onAnalysisChanged: () => () => {}, onAnalysisProgress: () => () => {} } as unknown as Backend);
+  const show = () => act(() => root.render(<WaveformDetail trackId="generated-pending-recovery" progress={0.5} span={1} width={400} height={80} detail />));
+  show();
+  await settle();
+  act(() => root.render(null));
+  show();
+  await settle();
+  expect(read).toHaveBeenCalledTimes(1);
+  pending.resolve(bytes);
+  await settle();
+  expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+});
+
+it.each([false, true])("an invalidated old read cannot replace newer cached bytes (empty=%s)", async (empty) => {
+  const old = deferred<Uint8Array>();
+  const next = deferred<Uint8Array>();
+  const bytes = new Uint8Array([90, 50, 20, 80, 40, 10]);
+  const read = vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise);
+  let changed = (_id: string) => {};
+  __setBackend({ trackWaveform: read,
+    onAnalysisChanged: (listener: (id: string) => void) => { changed = listener; return () => {}; },
+    onAnalysisProgress: () => () => {},
+  } as unknown as Backend);
+  const id = `generated-edition-recovery-${empty}`;
+  const show = () => act(() => root.render(<WaveformDetail trackId={id} progress={0.5} span={1} width={400} height={80} detail />));
+  show();
+  await settle();
+  act(() => changed(id));
+  await settle();
+  expect(read).toHaveBeenCalledTimes(2);
+  next.resolve(bytes);
+  await settle();
+  old.resolve(empty ? new Uint8Array() : new Uint8Array([1, 1, 1]));
+  await settle();
+  act(() => root.render(null));
+  show();
+  await settle();
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(drawn.wave).toHaveBeenLastCalledWith(expect.anything(), bytes, expect.any(Number), expect.any(Number), "3band", true, false, expect.anything());
+});
