@@ -376,6 +376,11 @@ impl LinkExport {
         self.catalog.forget_analysis();
     }
 
+    /// Refresh the completed track and exact-file sharers, retaining other previews.
+    pub fn analysis_changed_for(&self, track: u64, file: &std::path::Path) {
+        self.catalog.forget_analysis_for(track, file);
+    }
+
     /// Tells a CDJ to load a specific track from our library.
     ///
     /// Refused until the player has mounted the export, as rekordbox refuses

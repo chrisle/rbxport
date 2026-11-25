@@ -430,6 +430,8 @@ pub struct Session {
     export: Option<LinkExport>,
     stop: Arc<AtomicBool>,
     reporter: Option<std::thread::JoinHandle<()>>,
+    #[cfg(test)]
+    analysis_catalog_for_test: Option<Arc<rbl_link::IndexCatalog>>,
 }
 
 impl Session {
@@ -557,7 +559,9 @@ impl Session {
                 }
             })
         };
-        Ok(Self { rx3_activation, export: Some(export), stop, reporter: Some(reporter) })
+        Ok(Self { rx3_activation, export: Some(export), stop, reporter: Some(reporter),
+            #[cfg(test)] analysis_catalog_for_test: None,
+        })
     }
 
     /// The session as the window shows it, with the loaded tracks named
@@ -601,6 +605,15 @@ impl Session {
         if let Some(export) = &self.export {
             export.analysis_changed();
         }
+        #[cfg(test)]
+        if let Some(catalog) = &self.analysis_catalog_for_test { catalog.forget_analysis(); }
+    }
+
+    /// Refresh one completed track; library reloads still invalidate all.
+    pub fn analysis_changed_for(&self, track: u64, file: &std::path::Path) {
+        if let Some(export) = &self.export { export.analysis_changed_for(track, file); }
+        #[cfg(test)]
+        if let Some(catalog) = &self.analysis_catalog_for_test { catalog.forget_analysis_for(track, file); }
     }
 
     /// Tells a CDJ on the link to load a track from our library.
@@ -1239,7 +1252,7 @@ mod history_tests {
         state.write(|writer| writer.set_analysis(&track, &rbl_db::write::AnalysisWrite {
             bpm_x100: 12000, key: None, analysis_path: &relative, length_sec: None,
         })).unwrap();
-        state.note_analysis(&track, &relative);
+        state.note_analysis(&track, &relative, &dat);
         assert!(Arc::ptr_eq(&original, &state.library().unwrap()));
         for kind in ["mono", "colour", "bands"] {
             assert_ne!(crate::commands::waveform_bytes(&state, &original, &location.share_root,
@@ -1255,6 +1268,78 @@ mod history_tests {
         assert!(during == after, "completed analysis should not wait for the queue's final reload: during={:?}, after={:?}",
             during.iter().map(|bytes| bytes.as_ref().map(Vec::len)).collect::<Vec<_>>(),
             after.iter().map(|bytes| bytes.as_ref().map(Vec::len)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn reanalysis_refreshes_cached_link_previews_before_the_queue_reload() {
+        use rbl_dbserver::catalog::{Analysis, Catalog};
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let track = rbl_db::fixture::track_id(0);
+        let relative = "/reanalysis/ANLZ0000.DAT";
+        rbl_db::fixture::set_analysis_path(&location, 0, relative).unwrap();
+        // Two ordinary master rows may share the same published analysis.
+        rbl_db::fixture::set_analysis_path(&location, 1, relative).unwrap();
+        let dat = rbl_anlz::resolve(&location.share_root, relative);
+        std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+        let publish = |value: u8| {
+            let mut blue = rbl_anlz::AnlzBuilder::new();
+            blue.waveform_preview(b"PWAV", &[0x20 | value; 400]).waveform_preview(b"PWV2", &[value.min(15); 100]);
+            std::fs::write(&dat, blue.finish()).unwrap();
+            let mut rgb = rbl_anlz::AnlzBuilder::new();
+            rgb.waveform_scroll(b"PWV4", 6, &vec![value; 7200]);
+            std::fs::write(rbl_anlz::sibling(&dat, "EXT"), rgb.finish()).unwrap();
+            let mut bands = rbl_anlz::AnlzBuilder::new();
+            bands.waveform_scroll(b"PWV6", 3, &vec![value; 3600]);
+            std::fs::write(rbl_anlz::sibling(&dat, "2EX"), bands.finish()).unwrap();
+        };
+        publish(9);
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        drop(db);
+        crate::backups::create(&state).unwrap();
+        let original = state.library().unwrap();
+        let source = StateSource(Arc::downgrade(&state), Arc::new(|_, _| {}),
+            rbl_prolink::DeviceSettings::default(), rbl_link::KeyOrder::Musical);
+        let catalog = Arc::new(rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default()));
+        // Exercise real AppState → Session invalidation without binding ports.
+        state.set_link(Some(Session { rx3_activation: None, export: None,
+            stop: Arc::new(AtomicBool::new(false)), reporter: None,
+            analysis_catalog_for_test: Some(catalog.clone()),
+        }));
+        let wanted = [Analysis::WaveformPreview,
+            Analysis::Tag { fourcc: *b"PWV4", extension: *b"EXT" },
+            Analysis::Tag { fourcc: *b"PWV6", extension: *b"2EX" }];
+        let numeric = track.parse().unwrap();
+        let read = || wanted.iter().map(|what| catalog.analysis(numeric, what)).collect::<Vec<_>>();
+        let before = read();
+        assert!(before.iter().all(Option::is_some));
+        let alias = rbl_db::fixture::track_id(1).parse().unwrap();
+        let read_alias = || wanted.iter().map(|what| catalog.analysis(alias, what)).collect::<Vec<_>>();
+        assert!(read_alias() == before, "the second row starts with the same cached data");
+        publish(17);
+        state.write(|writer| writer.set_analysis(&track, &rbl_db::write::AnalysisWrite {
+            bpm_x100: 12000, key: None, analysis_path: relative, length_sec: None,
+        })).unwrap();
+        state.note_analysis(&track, relative, &dat);
+        assert!(Arc::ptr_eq(&original, &state.library().unwrap()));
+        assert_eq!(crate::commands::waveform_bytes(&state, &original, &location.share_root,
+            &track, "mono", None, None).unwrap(), vec![0x31; 400]);
+        let during = read();
+        let alias_during = read_alias();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (reloaded, _) = rbl_index::load(&db).unwrap();
+        state.set_library(reloaded, false, db.schema().db_version, 0, location);
+        let after = read();
+        assert!(before != after, "the generated analysis actually changed");
+        let signatures = |replies: &[Option<Vec<u8>>]| replies.iter().map(|reply|
+            reply.as_ref().map(|bytes| (bytes.len(), bytes.iter().map(|&byte| u64::from(byte)).sum::<u64>()))).collect::<Vec<_>>();
+        assert!(during == after, "reanalysis should invalidate the live catalog before queue reload: during={:?}, after={:?}",
+            signatures(&during), signatures(&after));
+        assert!(alias_during == after, "shared analysis must refresh for both content IDs: alias={:?}, after={:?}",
+            signatures(&alias_during), signatures(&after));
     }
 
 }

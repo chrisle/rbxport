@@ -173,6 +173,8 @@ struct AnalysisCache {
 struct Parsed {
     library: Weak<Library>,
     row: rbl_index::Row,
+    track: u64,
+    path: PathBuf,
     dat: Option<Anlz>,
     ext: Option<Anlz>,
     two_ex: Option<Anlz>,
@@ -1134,12 +1136,15 @@ impl IndexCatalog {
             cache.epoch
         };
         let dat_path = self.source.analysis_file(library, row)?;
+        let track = *library.ids.get(row as usize)?;
         let parsed = Arc::new(Parsed {
             library: owner,
             row,
             dat: read(&dat_path),
             ext: read(&rbl_anlz::sibling(&dat_path, "EXT")),
             two_ex: read(&rbl_anlz::sibling(&dat_path, "2EX")),
+            track,
+            path: dat_path,
         });
         let mut cache = self.analysis.lock();
         // A read already in flight may finish, but a reload or analysis
@@ -1151,6 +1156,17 @@ impl IndexCatalog {
             cache.entries.push(Arc::clone(&parsed));
         }
         Some(parsed)
+    }
+
+    /// Retire a completed track and rows sharing its exact published file.
+    /// IDs and paths were captured from each entry's library snapshot; `file`
+    /// is the resolved DAT used for publication. Only the bounded cache is
+    /// inspected; no Source calls, path normalization or file IO occur.
+    pub fn forget_analysis_for(&self, track: u64, file: &std::path::Path) {
+        let mut cache = self.analysis.lock();
+        // Increment even on a cold miss: a read may already be in flight.
+        cache.epoch = cache.epoch.wrapping_add(1);
+        cache.entries.retain(|parsed| parsed.track != track && parsed.path.as_path() != file);
     }
 
     /// Forgets parsed analysis files, for after a library reload or an
@@ -2927,6 +2943,10 @@ mod tests {
     }
 
     fn preview_after_late_read(replace_library: bool, missing: bool) {
+        preview_after_late_read_with_target(replace_library, missing, false);
+    }
+
+    fn preview_after_late_read_with_target(replace_library: bool, missing: bool, targeted: bool) {
         use std::sync::mpsc;
         let root = tempfile::tempdir().unwrap();
         if !missing { write_preview(root.path(), "/old.DAT", 2); }
@@ -2949,10 +2969,12 @@ mod tests {
         waiting.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         let current = if replace_library { analysis_library("/new.DAT") } else { source.library().unwrap() };
         write_preview(root.path(), current.analysis_path.get(0), 9);
+        let changed_file = rbl_anlz::resolve(root.path(), current.analysis_path.get(0));
         *source.library.lock() = current;
         // This must complete while file IO is paused, and must prevent its
         // already-started read from repopulating the cache afterward.
-        catalog.forget_analysis();
+        if targeted { catalog.forget_analysis_for(10, &changed_file); }
+        else { catalog.forget_analysis(); }
         release.send(()).unwrap();
         worker.join().unwrap();
         assert_eq!(catalog.analysis(10, &Wanted::WaveformPreview), Some(blobs::waveform_preview_blob(&[9], &[])));
@@ -2971,6 +2993,39 @@ mod tests {
     #[test]
     fn a_late_missing_read_cannot_hide_analysis_after_same_library_invalidation() {
         preview_after_late_read(false, true);
+    }
+
+    #[test]
+    fn targeted_completion_rejects_an_already_started_fill_without_a_cached_entry() {
+        preview_after_late_read_with_target(false, false, true);
+        preview_after_late_read_with_target(false, true, true);
+    }
+
+    #[test]
+    fn targeted_completion_keeps_unrelated_previews_cached() {
+        let root = tempfile::tempdir().unwrap();
+        write_preview(root.path(), "/target.DAT", 2);
+        write_preview(root.path(), "/other.DAT", 7);
+        let mut library = library_from(&[
+            TestTrack { id: 10, ..TestTrack::default() },
+            TestTrack { id: 20, ..TestTrack::default() },
+        ]);
+        library.analysis_path = rbl_index::strings::StrColumn::default();
+        library.analysis_path.push("/target.DAT");
+        library.analysis_path.push("/other.DAT");
+        let source = AnalysisSource { library: Mutex::new(Arc::new(library)), root: root.path().into() };
+        let catalog = IndexCatalog::new(Arc::new(source), Played::default());
+        let preview = Wanted::WaveformPreview;
+        assert_eq!(catalog.analysis(10, &preview), Some(blobs::waveform_preview_blob(&[2], &[])));
+        let other = catalog.analysis(20, &preview);
+        assert_eq!(other, Some(blobs::waveform_preview_blob(&[7], &[])));
+        std::fs::remove_file(root.path().join("other.DAT")).unwrap();
+        write_preview(root.path(), "/target.DAT", 9);
+        catalog.forget_analysis_for(10, &root.path().join("target.DAT"));
+        assert_eq!(catalog.analysis(10, &preview), Some(blobs::waveform_preview_blob(&[9], &[])));
+        assert_eq!(catalog.analysis(20, &preview), other, "unrelated data is still cached");
+        catalog.forget_analysis();
+        assert_eq!(catalog.analysis(20, &preview), None, "a full reload still clears every entry");
     }
 
     #[test]

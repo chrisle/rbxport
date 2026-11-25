@@ -342,7 +342,7 @@ fn analyse_and_save_notated(
     let length_sec = Some(duration_sec);
 
     save_analysis_files(state, &location, track_id, &dat, files, bpm_x100, detected_key.as_deref(), &relative, length_sec, editor)?;
-    state.note_analysis(track_id, &relative);
+    state.note_analysis(track_id, &relative, &dat);
     let added_first_beat_cue = match beats.first() {
         Some(first) if settings.first_beat_cue => add_first_beat_cue(state, library, track_id, first.time_ms)?,
         _ => false,

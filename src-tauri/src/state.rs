@@ -642,8 +642,14 @@ impl AppState {
     }
 
     /// Notes that `track`'s row now names the analysis at `relative`.
-    pub(crate) fn note_analysis(&self, track: &str, relative: &str) {
+    pub(crate) fn note_analysis(&self, track: &str, relative: &str, file: &std::path::Path) {
         self.fresh_analysis.lock().insert(track.to_owned(), relative.to_owned());
+        // Release the overlay lock before taking inner and the cache lock,
+        // matching reload invalidation and keeping all file IO outside them.
+        if let Some(session) = self.inner.read().link.as_ref() {
+            if let Ok(id) = track.parse::<u64>() { session.analysis_changed_for(id, file); }
+            else { session.analysis_changed(); }
+        }
     }
 
     /// The waveform an analysis is drawing for `track`, while it is.
@@ -1383,7 +1389,7 @@ mod analysis_owner_tests {
         let state = AppState::with_backups(dir.path().join("backups"));
         let track = rbl_db::fixture::track_id(0);
         state.set_library(read(&first), false, None, 0, first.clone());
-        state.note_analysis(&track, "/first/ANLZ0000.DAT");
+        state.note_analysis(&track, "/first/ANLZ0000.DAT", &rbl_anlz::resolve(&first.share_root, "/first/ANLZ0000.DAT"));
         let expected_first = rbl_anlz::resolve(&first.share_root, "/first/ANLZ0000.DAT");
         let previous = state.library().unwrap();
         let row = previous.row_of(&track).unwrap() as usize;
@@ -1396,7 +1402,7 @@ mod analysis_owner_tests {
         assert_eq!(state.analysis_file_for_snapshot(&current, row), Some(expected_first.clone()));
         state.set_library(read(&second), false, None, 0, second.clone());
         assert_eq!(state.registered_analysis(&track), None, "the other master owns the reused content ID");
-        state.note_analysis(&track, "/second/ANLZ0000.DAT");
+        state.note_analysis(&track, "/second/ANLZ0000.DAT", &rbl_anlz::resolve(&second.share_root, "/second/ANLZ0000.DAT"));
         assert_eq!(state.analysis_file_for_snapshot(&current, row), None);
         assert_eq!(captured, expected_first, "a captured path retains its original root after a switch");
         assert_eq!(state.analysis_file_for_snapshot(&state.library().unwrap(), row),
