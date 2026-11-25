@@ -519,6 +519,7 @@ function AppBody() {
   const exportBatch = [...exportJobs.values()];
   const exportRunning = exportBatch.some(isExportActive);
   const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
+  const canDropCollectionFiles = sessionReady && !readOnly;
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -1253,6 +1254,12 @@ function AppBody() {
     return answer;
   }, []);
 
+  const requireImportReady = useCallback(() => {
+    if (sessionReady) return true;
+    refuse(t("The library has not finished loading yet."));
+    return false;
+  }, [sessionReady, refuse, t]);
+
   /**
    * Files dragged in from outside the app (Finder, Explorer) and dropped on
    * a playlist: imported, then added to that playlist, the way a dragged
@@ -1261,6 +1268,7 @@ function AppBody() {
    */
   const importDroppedPathsTo = useCallback(
     (playlistId: string, paths: string[]) => {
+      if (!requireImportReady()) return;
       if (advancedPrefs.protectLibrary) {
         refuse(refusal(true));
         return;
@@ -1355,7 +1363,7 @@ function AppBody() {
       });
     },
     [tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates,
-      advancedPrefs.folderDropClash, askFolderClash, noteSkips],
+      advancedPrefs.folderDropClash, askFolderClash, noteSkips, requireImportReady],
   );
 
   const importExplorerFolder = useCallback((node: TreeNode) => {
@@ -1365,6 +1373,7 @@ function AppBody() {
   }, [readOnly, importDroppedPathsTo]);
 
   const importDroppedPathsToCollection = useCallback((paths: string[]) => {
+    if (!requireImportReady()) return;
     if (readOnly) {
       refuse(refusal(advancedPrefs.protectLibrary));
       return;
@@ -1396,7 +1405,7 @@ function AppBody() {
         report(`Imported ${imported.imported} of ${files.length} files${skippedTail(imported.skipped)}${already}.`);
       },
     });
-  }, [readOnly, advancedPrefs.protectLibrary, refuse, jobs, t, analysisPrefs.auto, analysis, report, noteSkips]);
+  }, [readOnly, advancedPrefs.protectLibrary, refuse, jobs, t, analysisPrefs.auto, analysis, report, noteSkips, requireImportReady]);
 
   const importDroppedPaths = useCallback((target: string, paths: string[]) => {
     if (target === "all") importDroppedPathsToCollection(paths);
@@ -1405,21 +1414,23 @@ function AppBody() {
 
   const importDroppedFilesTo = useCallback(
     (target: string, files: File[]) => {
+      if (!requireImportReady()) return;
       // Resolve immediately: macOS's drag pasteboard belongs to the current
       // OS drag, not to the File object retained by this callback.
       void droppedFilePaths(files)
         .then((paths) => importDroppedPaths(target, paths))
         .catch((e: unknown) => refuse(e instanceof Error ? e.message : "Those files could not be imported."));
     },
-    [importDroppedPaths, refuse],
+    [importDroppedPaths, refuse, requireImportReady],
   );
 
   useEffect(() => subscribeNativeFileDrops((drop) => {
+    if (!requireImportReady()) return;
     const target = document.elementFromPoint(drop.x, drop.y);
     const dropTarget = target?.closest<HTMLElement>("[data-file-drop-playlist]")?.dataset.fileDropPlaylist;
     if (dropTarget) importDroppedPaths(dropTarget, drop.paths);
     else refuse(t("Drop files or folders onto All Tracks or a playlist to import them."));
-  }), [importDroppedPaths, refuse, t]);
+  }), [importDroppedPaths, refuse, t, requireImportReady]);
 
   /**
    * Files dropped into the open All Tracks or playlist list follow the same
@@ -1427,10 +1438,10 @@ function AppBody() {
    */
   const importDroppedFilesIntoOpen = useMemo(
     () =>
-      readOnly || (selectedNode?.kind !== "playlist" && selectedNode?.kind !== "allTracks")
+      !canDropCollectionFiles || (selectedNode?.kind !== "playlist" && selectedNode?.kind !== "allTracks")
         ? undefined
         : (files: File[]) => importDroppedFilesTo(selectedNode.id, files),
-    [readOnly, selectedNode, importDroppedFilesTo],
+    [canDropCollectionFiles, selectedNode, importDroppedFilesTo],
   );
 
   /**
@@ -3279,7 +3290,7 @@ function AppBody() {
     canDropToDevicePlaylists: Boolean(draggedTracks), onDropDeviceTracks: addDraggedToDevice,
     draggingToDevice: draggedTracks !== null && !hasLooseId(draggedTracks.ids), onDropTracksOnDevice: exportDraggedTo,
     onImportFolderPlaylist: importExplorerFolder,
-    onDropFiles: readOnly ? undefined : importDroppedFilesTo,
+    onDropFiles: canDropCollectionFiles ? importDroppedFilesTo : undefined,
     onExport: exportPlaylist, exportDevices: menuDevices, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
     onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode,
     onMoveNode: readOnly ? undefined : moveNode, onExpand: expandNode,
@@ -3291,7 +3302,7 @@ function AppBody() {
     onEjectDevice: ejectDevice,
     ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
   }), [
-    draggedTracks, addDraggedTo, addDraggedToDevice, exportDraggedTo, readOnly, importDroppedFilesTo, importExplorerFolder, exportPlaylist, menuDevices, exportPlaylistFile,
+    draggedTracks, addDraggedTo, addDraggedToDevice, exportDraggedTo, readOnly, canDropCollectionFiles, importDroppedFilesTo, importExplorerFolder, exportPlaylist, menuDevices, exportPlaylistFile,
     createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, expandNode,
     viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
     addPlaylistArtwork, addToShortcut, sortItems, createOnDevice, renameOnDevice, deleteOnDevice,
@@ -3506,7 +3517,7 @@ function AppBody() {
           draggingToDevice={draggedTracks !== null && !hasLooseId(draggedTracks.ids)}
           onDropTracksOnDevice={exportDraggedTo}
           onImportFolderPlaylist={importExplorerFolder}
-          onDropFiles={readOnly ? undefined : importDroppedFilesTo}
+          onDropFiles={canDropCollectionFiles ? importDroppedFilesTo : undefined}
           onExport={exportPlaylist}
           exportDevices={menuDevices}
           onExportFile={exportPlaylistFile}

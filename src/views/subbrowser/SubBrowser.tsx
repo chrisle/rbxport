@@ -318,7 +318,7 @@ export const SubBrowser = memo(function SubBrowser({
         {...list}
         onDropTracks={selected?.kind === "playlist" ? list.onDropTracks : undefined}
         onDropFiles={
-          !list.readOnly && (spec.source.kind === "playlist" || selected?.kind === "allTracks") ? dropFilesIntoPlaylist : undefined
+          tree.onDropFiles && !list.readOnly && (spec.source.kind === "playlist" || selected?.kind === "allTracks") ? dropFilesIntoPlaylist : undefined
         }
         onRemoveFromPlaylist={removeFromPlaylist}
         onRemoveFromHistory={removeFromHistory}
