@@ -192,9 +192,9 @@ export const WaveformPreview = memo(function WaveformPreview({
   useEffect(() => {
     let cancelled = false;
     const dpr = window.devicePixelRatio || 1;
-    const key = `${startupCache ? "startup" : "live"}:${palette}:${half ? "half" : "full"}:${WaveformCache.key(trackId, width, dpr)}`;
+    const key = `${startupCache ? "startup" : "live"}:${palette}:${half ? "half" : "full"}:${WaveformCache.key(trackId, width, height, dpr)}`;
 
-    const identity = `${key}:${height}`;
+    const identity = key;
     const clear = () => {
       const canvas = ref.current;
       if (!canvas || cancelled || !painted.current) return;

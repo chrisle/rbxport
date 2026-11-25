@@ -784,8 +784,8 @@ export class WaveformCache {
     this.#max = max;
   }
 
-  static key(trackId: string, width: number, dpr: number): string {
-    return `${trackId}:${Math.round(width)}:${dpr}`;
+  static key(trackId: string, width: number, height: number, dpr: number): string {
+    return `${trackId}:${Math.round(width)}:${Math.round(height)}:${dpr}`;
   }
 
   get(key: string): RenderedWaveform | undefined {
