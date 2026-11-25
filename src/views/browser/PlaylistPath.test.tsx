@@ -53,3 +53,14 @@ it("keeps failed lookup empty and reports its reason", async () => {
   expect(host.querySelector("select")!.disabled).toBe(true);
   expect(log).toHaveBeenCalledWith(true, "unavailable The playlist database is busy.");
 });
+
+it.each([null, "102"])("waits for a fresh answer after A→%s→A", async middle => {
+  render("101"); await settle();
+  await act(async () => { requests[0]!.done([{ id: "old", name: "Old membership", path: "" }]); await Promise.resolve(); });
+  render(middle); await settle();
+  render("101"); await settle();
+  expect(host.querySelector("select")!.disabled).toBe(true);
+  expect(host.textContent).not.toContain("Old membership");
+  await act(async () => { requests.at(-1)!.done([{ id: "new", name: "Current membership", path: "" }]); await Promise.resolve(); });
+  expect(host.textContent).toContain("Current membership");
+});

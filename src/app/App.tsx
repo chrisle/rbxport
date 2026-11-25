@@ -921,12 +921,12 @@ function AppBody() {
   // With All Tracks hidden from the tree (View › Layout), the Playlists
   // heading lists the same collection.
   const openContainingPlaylist = useCallback((id: string | null) => {
-    const node = id === null ? tree.find(item => item.kind === "allTracks") ?? tree.find(item => item.kind === "collection")
+    const node = id === null ? (viewPrefs.allTracks ? tree.find(item => item.kind === "allTracks") : undefined) ?? tree.find(item => item.kind === "collection")
       : tree.find(item => item.id === id && (item.kind === "playlist" || item.kind === "smartPlaylist"));
     if (!node) return false;
     setSelectedNode(node);
     return true;
-  }, [tree]);
+  }, [tree, viewPrefs.allTracks]);
   const showCollection = useCallback(() => {
     const target = (viewPrefs.allTracks ? tree.find((item) => item.kind === "allTracks") : undefined)
       ?? tree.find((item) => item.kind === "collection");

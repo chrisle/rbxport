@@ -1,5 +1,5 @@
 /** One bounded selection read; old owners never display a newer owner's paths. */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { errorMessage } from "@/lib/errorMessage";
 import { getBackend } from "@/ipc/client";
 import type { RelatedPlaylist } from "@/ipc/types";
@@ -9,19 +9,19 @@ export function reportPlaylistError(error: unknown): void {
 }
 
 export function useTrackPlaylists(track: string | null, owner: string): RelatedPlaylist[] | null {
-  const key = JSON.stringify([owner, track]);
-  const [answer, setAnswer] = useState<{ key: string; paths: RelatedPlaylist[] | null }>();
+  const request = useMemo(() => ({ owner, track }), [owner, track]);
+  const [answer, setAnswer] = useState<[request: typeof request, paths: RelatedPlaylist[] | null]>();
   useEffect(() => {
-    if (track === null) return;
+    if (request.track === null) return;
     let live = true;
-    void getBackend().then(backend => backend.trackPlaylists(track)).then(paths => {
-      if (live) setAnswer({ key, paths });
+    void getBackend().then(backend => backend.trackPlaylists(request.track!)).then(paths => {
+      if (live) setAnswer([request, paths]);
     }).catch(error => {
       if (!live) return;
-      setAnswer({ key, paths: null });
+      setAnswer([request, null]);
       reportPlaylistError(error);
     });
     return () => { live = false; };
-  }, [key, track]);
-  return track !== null && answer?.key === key ? answer.paths : null;
+  }, [request]);
+  return answer?.[0] === request ? answer[1] : null;
 }

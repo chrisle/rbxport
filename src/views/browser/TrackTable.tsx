@@ -1516,13 +1516,13 @@ export const TrackTable = memo(function TrackTable({
     if (!answersLocate) return;
     return registerLocateLoaded(locateLoaded);
   }, [answersLocate, locateLoaded]);
-  const [playlistLocate, setPlaylistLocate] = useState<{ playlist: string | null; track: string; generation: number } | null>(null);
+  const [playlistLocate, setPlaylistLocate] = useState<{ playlist: string | null; track: string; generation: number; selection: ReadonlySet<string> } | null>(null);
   const latestSelection = useRef(selection.ids);
   useLayoutEffect(() => { latestSelection.current = selection.ids; }, [selection.ids]);
   const restorePlaylistTrack = useEventCallback((id: string, current: () => boolean) => locateHere(id, current));
   useEffect(() => {
     if (!playlistLocate) return;
-    if ((libraryGeneration ?? 0) !== playlistLocate.generation) { setPlaylistLocate(null); return; }
+    if ((libraryGeneration ?? 0) !== playlistLocate.generation || latestSelection.current !== playlistLocate.selection) { setPlaylistLocate(null); return; }
     if (playlistLocate.playlist === null ? spec.source.kind !== "collection"
       : spec.source.kind !== "playlist" || spec.source.id !== playlistLocate.playlist) {
       setPlaylistLocate(null);
@@ -1530,8 +1530,7 @@ export const TrackTable = memo(function TrackTable({
     }
     if (view.loading) return;
     let live = true;
-    const requestedSelection = latestSelection.current;
-    void restorePlaylistTrack(playlistLocate.track, () => live && latestSelection.current === requestedSelection)
+    void restorePlaylistTrack(playlistLocate.track, () => live && latestSelection.current === playlistLocate.selection)
       .catch(error => { if (live) reportPlaylistError(error); })
       .finally(() => { if (live) setPlaylistLocate(null); });
     return () => { live = false; };
@@ -2372,7 +2371,7 @@ export const TrackTable = memo(function TrackTable({
             track={selection.ids.size === 1 && pathSelection !== null && selection.ids.has(pathSelection.id) && !view.loading && pathSelection.source === view.sourceKey && spec.source.kind !== "device" && /^\d+$/.test(pathSelection.id) ? pathSelection.id : null}
             owner={`${libraryGeneration}:${view.sourceKey}`}
             onChoose={(playlist, track) => {
-              if (onOpenPlaylist(playlist)) setPlaylistLocate({ playlist, track, generation: libraryGeneration ?? 0 });
+              if (onOpenPlaylist(playlist)) setPlaylistLocate({ playlist, track, generation: libraryGeneration ?? 0, selection: selection.ids });
             }}
           /> : <>{view.loading ? title : `${title} (${view.count} Tracks)`}</>}
         </span>
