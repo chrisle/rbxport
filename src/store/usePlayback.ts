@@ -244,7 +244,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const readyStart = useRef<{ loadId: number; generation: number | null; waiting: boolean } | null>(null);
   const transportVersion = useRef(0);
   const deferredSeek = useRef<number | null>(null);
-  const desiredTempo = useRef(1);
+  const engineTempo = useRef(1);
+  // Ticks still describe the audio clock while a new tempo is in flight.
+  // Keep the requested tempo for the display and the next load until it lands.
+  const tempoIntent = useRef<{ value: number; sent: boolean } | null>(null);
   const desiredMasterTempo = useRef(false);
   const desiredKeyShift = useRef(0);
   const desiredLoop = useRef<DeckLoop | null>(null);
@@ -287,8 +290,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       try {
         const backend = await getBackend();
         if (!currentLoad(request)) return;
+        const intent = tempoIntent.current;
         await Promise.all([
-          backend.deckTempo(DECK, desiredTempo.current),
+          backend.deckTempo(DECK, intent?.value ?? engineTempo.current).then(() => {
+            if (intent) intent.sent = true;
+          }),
           backend.deckMasterTempo(DECK, desiredMasterTempo.current),
           backend.deckKeyShift(DECK, desiredKeyShift.current),
         ]);
@@ -420,10 +426,12 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       setPlaying(deck.playing);
       desiredPlaying.current = deck.playing;
       setDuration(rate > 0 ? deck.totalFrames / rate : 0);
-      // The engine's word for both, so a deck loaded by something else still
-      // shows what it is doing.
-      setTempoState(deck.tempo > 0 ? deck.tempo : 1);
-      desiredTempo.current = deck.tempo > 0 ? deck.tempo : 1;
+      // Follow the engine's display once it reflects this request. The
+      // deck's tempo is f32, so compare the requested value at that precision.
+      engineTempo.current = deck.tempo > 0 ? deck.tempo : 1;
+      const intent = tempoIntent.current;
+      if (intent?.sent && Math.fround(intent.value) === Math.fround(engineTempo.current)) tempoIntent.current = null;
+      setTempoState(tempoIntent.current?.value ?? engineTempo.current);
       setMasterTempoState(deck.masterTempo);
       desiredMasterTempo.current = deck.masterTempo;
       setKeyShiftState(deck.keyShift);
@@ -877,21 +885,28 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     (next: number) => {
       if (idle || !Number.isFinite(next)) return;
       const safe = Math.min(Math.max(next, 0.5), 2);
-      desiredTempo.current = safe;
+      const intent = { value: safe, sent: false };
+      tempoIntent.current = intent;
       // Shown at once rather than on the next tick: a fader that answers a
       // tenth of a second later is a fader people press twice.
       setTempoState(safe);
-      if (!isLoaded()) return;
+      const request = targetLoad.current;
+      if (request === null || !isLoaded()) return;
       void (async () => {
         try {
           const backend = await getBackend();
+          if (tempoIntent.current !== intent || !currentLoad(request)) return;
           await backend.deckTempo(DECK, safe);
+          intent.sent = true;
         } catch (failure) {
+          if (tempoIntent.current !== intent || !currentLoad(request)) return;
+          tempoIntent.current = null;
+          setTempoState(engineTempo.current);
           setError(reasonFrom(failure));
         }
       })();
     },
-    [idle, isLoaded, DECK],
+    [idle, isLoaded, currentLoad, DECK],
   );
 
   const nudgeTempo = useCallback(

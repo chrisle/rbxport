@@ -40,6 +40,8 @@ let tick: (value: Tick) => void;
 let reset: () => void;
 let loads: { track: string; id: number }[];
 let sent: string[];
+let tempoWrites: number[];
+let tempoResult: (value: number) => Promise<void>;
 let unloads = 0;
 let tickSubscriptions = 0;
 let resetListeners: Set<() => void>;
@@ -71,7 +73,7 @@ function backend(): Backend {
     deckPlayAfter: (_deck: "a" | "b", ms: number) => { sent.push(`play-after:${ms}`); return done(); },
     deckPause: () => { sent.push("pause"); return done(); },
     deckSeek: (_deck: "a" | "b", ms: number) => { sent.push(`seek:${ms}`); return done(); },
-    deckTempo: () => done(),
+    deckTempo: (_deck: "a" | "b", tempo: number) => { tempoWrites.push(tempo); return tempoResult(tempo); },
     deckMasterTempo: () => done(),
     deckKeyShift: () => done(),
     deckSetLoop: () => done(),
@@ -106,6 +108,8 @@ beforeEach(async () => {
   tickSubscriptions = 0;
   intent = 0;
   sent = [];
+  tempoWrites = [];
+  tempoResult = done;
   resetListeners = new Set();
   reset = () => { for (const listener of resetListeners) listener(); };
   track = `track-a-${Math.random()}`;
@@ -124,6 +128,115 @@ afterEach(() => {
   __setBackend(null);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+it("keeps the requested tempo across load when a tick still reports the old tempo", async () => {
+  const first = loads[0]!;
+  finish(first);
+  await settle();
+  const halfSpeed = {
+    ...emptyTick,
+    b: { ...emptyDeck, loadId: first.id, loaded: true, totalFrames: RATE * 300, tempo: 0.5 },
+  };
+  act(() => deck.setTempo(0.5));
+  await settle();
+  act(() => tick(halfSpeed));
+  expect(deck.tempo).toBe(0.5);
+
+  act(() => deck.setTempo(1));
+  expect(deck.tempo).toBe(1);
+  // An already queued tick can arrive before the engine reports the reset.
+  act(() => tick(halfSpeed));
+  await select("track-b");
+  finish(loads[1]!);
+  await settle();
+
+  expect(tempoWrites.slice(-2)).toEqual([1, 1]);
+  expect(deck.tempo).toBe(1);
+});
+
+it("carries the observed native tempo when there is no local request", async () => {
+  finish(loads[0]!);
+  await settle();
+  act(() => tick({
+    ...emptyTick,
+    b: { ...emptyDeck, loadId: loads[0]!.id, loaded: true, totalFrames: RATE * 300, tempo: 0.75 },
+  }));
+  expect(deck.tempo).toBe(0.75);
+  await select("track-b");
+  finish(loads[1]!);
+  await settle();
+  expect(tempoWrites.at(-1)).toBe(0.75);
+});
+
+it("continues to adopt native tempo changes after the local request lands", async () => {
+  finish(loads[0]!);
+  await settle();
+  act(() => deck.setTempo(1.001));
+  await settle();
+  const reportTempo = (tempo: number) => tick({
+    ...emptyTick,
+    b: { ...emptyDeck, loadId: loads[0]!.id, loaded: true, totalFrames: RATE * 300, tempo },
+  });
+  act(() => reportTempo(Math.fround(1.001)));
+  act(() => reportTempo(0.75));
+  expect(deck.tempo).toBe(0.75);
+  await select("track-b");
+  finish(loads[1]!);
+  await settle();
+  expect(tempoWrites.at(-1)).toBe(0.75);
+});
+
+it("does not acknowledge a matching tick while the newest request is still being sent", async () => {
+  finish(loads[0]!);
+  await settle();
+  let finishReset!: () => void;
+  const dispatch = new Promise<void>((resolve) => { finishReset = resolve; });
+  tempoResult = (value) => value === 1 ? dispatch : done();
+  const reportTempo = (tempo: number) => tick({
+    ...emptyTick,
+    b: { ...emptyDeck, loadId: loads[0]!.id, loaded: true, totalFrames: RATE * 300, tempo },
+  });
+  act(() => deck.setTempo(0.5));
+  await settle();
+  act(() => deck.setTempo(1));
+  await settle();
+  act(() => { reportTempo(1); reportTempo(0.5); });
+  expect(deck.tempo).toBe(1);
+  await select("track-b");
+  finish(loads[1]!);
+  await settle();
+  expect(tempoWrites.at(-1)).toBe(1);
+  await act(async () => { finishReset(); await done(); });
+});
+
+it("leaves a newer tempo request in place when an older command fails", async () => {
+  finish(loads[0]!);
+  await settle();
+  let rejectOlder!: (error: Error) => void;
+  const older = new Promise<void>((_resolve, reject) => { rejectOlder = reject; });
+  tempoResult = (value) => value === 0.5 ? older : done();
+  act(() => deck.setTempo(0.5));
+  await settle();
+  act(() => deck.setTempo(1.25));
+  await settle();
+  await act(async () => { rejectOlder(new Error("older tempo failed")); await done(); });
+  expect(deck.tempo).toBe(1.25);
+  expect(deck.error).toBeNull();
+  await select("track-b");
+  finish(loads[1]!);
+  await settle();
+  expect(tempoWrites.at(-1)).toBe(1.25);
+});
+
+it("restores the observed tempo when the current tempo command fails", async () => {
+  finish(loads[0]!);
+  await settle();
+  tempoResult = () => Promise.reject(new Error("tempo was refused"));
+  act(() => deck.setTempo(0.5));
+  await settle();
+  expect(deck.tempo).toBe(1);
+  expect(deck.error).toBe("tempo was refused");
 });
 
 it("defers cue and play until the newest rapidly selected track is ready", async () => {
