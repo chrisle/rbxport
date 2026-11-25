@@ -1796,5 +1796,6 @@
   "Analysis stages could not be loaded.": "Det gick inte att läsa in analysstegen.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} kräver att {requirement} kommer tidigare i analysordningen.",
   "Drag stages to change the order they run.": "Dra stegen för att ändra ordningen de körs i.",
-  "Verifying all existing files": "Verifying all existing files"
+  "Verifying all existing files": "Verifying all existing files",
+  "Verifying all files on {devices}": "Verifying all files on {devices}"
 }

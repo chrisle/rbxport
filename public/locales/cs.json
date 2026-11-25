@@ -1799,5 +1799,6 @@
   "Analysis stages could not be loaded.": "Kroky analýzy se nepodařilo načíst.",
   "{stage} requires {requirement} earlier in the analysis order.": "Krok {stage} vyžaduje, aby mu v pořadí analýzy předcházel krok {requirement}.",
   "Drag stages to change the order they run.": "Přetažením kroků změníte pořadí jejich provádění.",
-  "Verifying all existing files": "Verifying all existing files"
+  "Verifying all existing files": "Verifying all existing files",
+  "Verifying all files on {devices}": "Verifying all files on {devices}"
 }

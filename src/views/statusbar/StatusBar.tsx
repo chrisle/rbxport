@@ -93,6 +93,7 @@ export function StatusBar({
     : activeExportStates.has("checking") ? `Checking ${exportNoun}`
     : activeExportStates.has("copying") ? `Exporting ${exportNoun}`
     : activeExportStates.has("database") ? `Building databases for ${exportNoun}`
+    : activeExportStates.has("verifying-all") ? t("Verifying all files on {devices}", { devices: exportNoun })
     : activeExportStates.has("verifying") ? `Verifying ${exportNoun}`
     : activeExportStates.has("publishing") ? `Publishing ${exportNoun}`
     : activeExportStates.has("ejecting") ? `Ejecting ${exportNoun}`

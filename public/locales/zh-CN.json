@@ -1803,5 +1803,6 @@
   "Analysis stages could not be loaded.": "无法加载分析步骤。",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage}要求{requirement}在分析顺序中排在前面。",
   "Drag stages to change the order they run.": "拖动步骤以更改执行顺序。",
-  "Verifying all existing files": "Verifying all existing files"
+  "Verifying all existing files": "Verifying all existing files",
+  "Verifying all files on {devices}": "Verifying all files on {devices}"
 }

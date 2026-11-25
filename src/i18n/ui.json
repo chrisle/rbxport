@@ -1391,6 +1391,7 @@
   "Value",
   "Verify all files (slower)",
   "Verifying all existing files",
+  "Verifying all files on {devices}",
   "Verifying backup…",
   "Verifying changed files and databases",
   "Version",

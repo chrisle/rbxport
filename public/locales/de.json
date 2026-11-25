@@ -1797,5 +1797,6 @@
   "Analysis stages could not be loaded.": "Die Analyseschritte konnten nicht geladen werden.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} setzt voraus, dass {requirement} in der Analysereihenfolge davor steht.",
   "Drag stages to change the order they run.": "Ziehen Sie die Schritte, um ihre Ausführungsreihenfolge zu ändern.",
-  "Verifying all existing files": "Verifying all existing files"
+  "Verifying all existing files": "Verifying all existing files",
+  "Verifying all files on {devices}": "Verifying all files on {devices}"
 }

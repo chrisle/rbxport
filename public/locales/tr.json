@@ -1799,5 +1799,6 @@
   "Analysis stages could not be loaded.": "Analiz aşamaları yüklenemedi.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} aşaması için {requirement} analiz sırasında daha önce gelmelidir.",
   "Drag stages to change the order they run.": "Çalıştırma sırasını değiştirmek için aşamaları sürükleyin.",
-  "Verifying all existing files": "Verifying all existing files"
+  "Verifying all existing files": "Verifying all existing files",
+  "Verifying all files on {devices}": "Verifying all files on {devices}"
 }

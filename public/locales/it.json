@@ -1800,5 +1800,6 @@
   "Analysis stages could not be loaded.": "Impossibile caricare le fasi di analisi.",
   "{stage} requires {requirement} earlier in the analysis order.": "{stage} richiede che {requirement} venga prima nell’ordine di analisi.",
   "Drag stages to change the order they run.": "Trascina le fasi per modificarne l’ordine di esecuzione.",
-  "Verifying all existing files": "Verifying all existing files"
+  "Verifying all existing files": "Verifying all existing files",
+  "Verifying all files on {devices}": "Verifying all files on {devices}"
 }

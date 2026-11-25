@@ -58,6 +58,20 @@ it("leaves the messages as plain text without a Log window to open", () => {
   expect(host.querySelectorAll("button")).toHaveLength(0);
 });
 
+it("distinguishes full, staged, and mixed verification for multiple USBs", () => {
+  const render = (states: readonly ("verifying-all" | "verifying")[]) => {
+    const exports = states.map((state, index) => ({ path: `/usb${index}`, name: `USB ${index}`, state, done: 0, total: 0, title: "" }));
+    act(() => root.render(<StatusBar exports={exports} />));
+  };
+  render(["verifying-all", "verifying-all"]);
+  expect(host.textContent).toContain("Verifying all files on 2 USBs");
+  expect(host.querySelector("progress")?.hasAttribute("value")).toBe(false);
+  render(["verifying", "verifying"]);
+  expect(host.textContent).toContain("Verifying 2 USBs");
+  render(["verifying-all", "verifying"]);
+  expect(host.textContent).toContain("Syncing 2 USBs");
+});
+
 it("names read-only as a library state", () => {
   act(() => root.render(<StatusBar readOnly />));
 
