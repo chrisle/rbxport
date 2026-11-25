@@ -23,6 +23,7 @@ pub mod plan;
 pub mod sync_record;
 pub mod snapshot;
 mod playlist_order;
+mod legacy_menus;
 mod reconcile;
 mod verification;
 
@@ -2022,7 +2023,7 @@ fn export_cancellable_inner(
     let existing_database = db_dir.join("exportLibrary.db");
     let settings = if existing_database.exists() {
         Some(rbl_onelibrary::settings::StickSettings::read(&existing_database).map_err(|e| one_library_error(&e))?)
-    } else { None };
+    } else { legacy_menus::read(&db_dir.join("export.pdb"), defaults)? };
     // The artwork table names the small image of each; a player derives the
     // others from the same name [ASSUME: what the `artwork` row of a
     // rekordbox export names, of the four files it writes per image].
