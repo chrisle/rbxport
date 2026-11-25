@@ -1169,9 +1169,12 @@ function AppBody() {
   }, []);
 
   const resolveDuplicates = useCallback(
-    async (playlistId: string, trackIds: string[], name: string): Promise<boolean | null> => {
+    async (playlistId: string, trackIds: string[], name: string, signal: AbortSignal): Promise<boolean | null> => {
       const backend = await getBackend();
       const held = await backend.edits.playlistDuplicates(playlistId, trackIds);
+      // Stop can arrive while this read is pending. The job's existing
+      // cancellation path must finish instead of waiting for a new question.
+      if (signal.aborted) return false;
       return askDuplicates(held.length, trackIds.length, name);
     },
     [askDuplicates],
@@ -1204,7 +1207,7 @@ function AppBody() {
             refuse(`Nothing added to ${name}${tail}.`);
             return;
           }
-          const allowDuplicates = await resolveDuplicates(playlistId, trackIds, name);
+          const allowDuplicates = await resolveDuplicates(playlistId, trackIds, name, signal);
           if (allowDuplicates === null) {
             report(`Nothing added to ${name}${tail}.`);
             return;
@@ -1338,7 +1341,7 @@ function AppBody() {
             // Files the library already held still belong in the playlist.
             const { ids: toAdd, skipped, existing } = sliced;
             update({ label: t("Adding {count} to {name}", { count: total, name }) });
-            const allowDuplicates = signal.aborted ? false : await resolveDuplicates(playlistId, toAdd, name);
+            const allowDuplicates = signal.aborted ? false : await resolveDuplicates(playlistId, toAdd, name, signal);
             let added = 0;
             let processed = 0;
             // Every slice of this add is one step of Edit › Undo (#499); the
