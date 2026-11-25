@@ -1118,6 +1118,17 @@ pub struct ExportOptions<'a> {
     pub my_tag_master_db_id_override: Option<u32>,
 }
 
+/// Aggregate diagnostic boundaries only: never log paths, titles or errors here.
+/// A begin record also identifies the owning call when it has not returned.
+fn save_phase<T, E>(phase: &'static str, operation: impl FnOnce() -> std::result::Result<T, E>) -> std::result::Result<T, E> {
+    tracing::info!(phase, "USB save phase started");
+    let started = std::time::Instant::now();
+    let result = operation();
+    let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    tracing::info!(phase, elapsed_ms, ok = result.is_ok(), "USB save phase finished");
+    result
+}
+
 /// Export with optional conversion of audio outside the common CDJ formats.
 /// Conversion shares the export's staging/publication and never edits sources.
 #[allow(clippy::too_many_lines, reason = "ordered export publication pipeline")]
@@ -2180,10 +2191,13 @@ fn export_cancellable_inner(
     before.check_changes_except(previous.as_ref(), &after, &device_additions)?;
     progress(&ExportProgress { stage: "verifying", done: 0, total: 0, title: String::new(), reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
     let verified_reused: BTreeSet<String> = trusted.iter().filter(|p| !publication.stage().join(p).is_file()).cloned().collect();
-    let verified = verification::verify_staged_incremental(publication.stage(), destination, &after, &absent_audio, &verified_reused)?;
-    if !verified.is_ok() {
-        return Err(ExportError::Conflict(format!("The export did not verify, so the USB was left as it was: {}", verification_failure(&verified))));
-    }
+    save_phase("staged_verify", || -> Result<()> {
+        let verified = verification::verify_staged_incremental(publication.stage(), destination, &after, &absent_audio, &verified_reused)?;
+        if !verified.is_ok() {
+            return Err(ExportError::Conflict(format!("The export did not verify, so the USB was left as it was: {}", verification_failure(&verified))));
+        }
+        Ok(())
+    })?;
     for (name, bytes) in settings_files {
         if !MY_SETTINGS_FILES.contains(&name.as_str()) && name != "DEVSETTING.DAT" {
             return Err(ExportError::Conflict("Unrecognized export settings file".into()));
@@ -2270,7 +2284,7 @@ fn export_cancellable_inner(
     }
     if cancelled() { return Err(ExportError::Cancelled); }
     progress(&ExportProgress { stage: "publishing", done: 0, total: 0, title: String::new(), reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
-    if let Err(error) = publication.commit_retained(&files) {
+    if let Err(error) = save_phase("publication", || publication.commit_retained(&files)) {
         if rbl_core::durable::Publication::validation_pending(destination, PUBLICATION) {
             if let Err(rollback) = publication.rollback() {
                 return Err(ExportError::Conflict(format!("Publication failed: {error}; recovery required: {rollback}")));
@@ -2280,17 +2294,22 @@ fn export_cancellable_inner(
     }
     let validate = (|| -> Result<()> {
         incremental::recheck();
-        let check = verification::verify_databases(destination)?;
-        if !check.is_ok() || check.tracks != report.tracks {
-            return Err(ExportError::Conflict(format!("Published generation did not verify: {}", verification_failure(&check))));
-        }
-        if let Some(g) = &mut manifest.generation {
-            g.outputs = incremental::output_revisions(destination, &manifest.tracks)?;
-            g.databases = incremental::databases(destination)?;
-        }
-        let bytes = serde_json::to_vec_pretty(&manifest).map_err(std::io::Error::other)?;
-        publication.seal(Path::new(&format!("{root_name}/rbxport/manifest.json")), &bytes)?;
-        Ok(())
+        save_phase("published_verify", || -> Result<()> {
+            let check = verification::verify_databases(destination)?;
+            if !check.is_ok() || check.tracks != report.tracks {
+                return Err(ExportError::Conflict(format!("Published generation did not verify: {}", verification_failure(&check))));
+            }
+            Ok(())
+        })?;
+        save_phase("receipt_seal", || -> Result<()> {
+            if let Some(g) = &mut manifest.generation {
+                g.outputs = incremental::output_revisions(destination, &manifest.tracks)?;
+                g.databases = incremental::databases(destination)?;
+            }
+            let bytes = serde_json::to_vec_pretty(&manifest).map_err(std::io::Error::other)?;
+            publication.seal(Path::new(&format!("{root_name}/rbxport/manifest.json")), &bytes)?;
+            Ok(())
+        })
     })();
     if let Err(error) = validate {
         if let Err(rollback) = publication.rollback() {
@@ -2298,22 +2317,25 @@ fn export_cancellable_inner(
         }
         return Err(ExportError::Conflict(format!("{error}; the previous library was restored")));
     }
-    publication.finalize()?;
-    report.verified = true;
-    publication.check_root()?;
-    // Content reclamation was journaled. Empty folders are only cosmetic;
-    // remove_dir refuses any directory another writer has populated.
-    for (relative, directory) in obsolete {
-        if relative.is_empty() || retained.contains(&relative.to_lowercase()) { continue; }
-        let path = checked_under(destination, &relative).map_err(|error| {
-            ExportError::Conflict(format!("Could not clean obsolete device path {relative:?} after publication: {error}"))
-        })?;
-        let mut empty = if directory { Some(path.as_path()) } else { path.parent() };
-        while let Some(dir) = empty.filter(|p| *p != destination && p.starts_with(destination)) {
-            if std::fs::remove_dir(dir).is_err() { break; }
-            empty = dir.parent();
+    save_phase("finalization", || -> Result<()> {
+        publication.finalize()?;
+        report.verified = true;
+        publication.check_root()?;
+        // Content reclamation was journaled. Empty folders are only cosmetic;
+        // remove_dir refuses any directory another writer has populated.
+        for (relative, directory) in obsolete {
+            if relative.is_empty() || retained.contains(&relative.to_lowercase()) { continue; }
+            let path = checked_under(destination, &relative).map_err(|error| {
+                ExportError::Conflict(format!("Could not clean obsolete device path {relative:?} after publication: {error}"))
+            })?;
+            let mut empty = if directory { Some(path.as_path()) } else { path.parent() };
+            while let Some(dir) = empty.filter(|p| *p != destination && p.starts_with(destination)) {
+                if std::fs::remove_dir(dir).is_err() { break; }
+                empty = dir.parent();
+            }
         }
-    }
+        Ok(())
+    })?;
 
     report.elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     report.metrics = incremental::metrics();
