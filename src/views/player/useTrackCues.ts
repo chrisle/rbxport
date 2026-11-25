@@ -8,7 +8,7 @@
  * deck all draw from this one array, so they move together and nothing
  * flashes.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { Cue, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
@@ -29,13 +29,16 @@ export function useTrackCues(
   // A ref so the fetch effect does not re-run when the callback's identity
   // does; the deck passes a fresh closure each render.
   const loaded = useRef(onLoaded);
-  loaded.current = onLoaded;
+  useLayoutEffect(() => { loaded.current = onLoaded; });
 
   useEffect(() => {
     if (!track) {
       setSnapshot(null);
       return;
     }
+    // Capture the committed callback for this request owner. A later render
+    // must not make an old response initialise a different track's CUE.
+    const onFirstLoad = loaded.current;
     const id = track.id;
     const device = track.deviceSource;
     let live = true;
@@ -53,7 +56,7 @@ export function useTrackCues(
       setSnapshot({ id, source: device, cues: found });
       if (first) {
         first = false;
-        loaded.current?.(found);
+        onFirstLoad?.(found);
       }
     };
     // Returning from rekordbox is when its cue edits become visible here.

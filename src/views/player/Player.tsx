@@ -106,6 +106,7 @@ import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
 import { useTrackCues } from "./useTrackCues";
+import { useCuePoint } from "./useCuePoint";
 import { activeMemoryLoop } from "./activeLoopPlayback";
 import { usePlayRecorder } from "./usePlayRecorder";
 import { previousRestarts } from "@/lib/continuousPlay";
@@ -980,12 +981,12 @@ export const Player = memo(function Player({
    * where rekordbox and a CDJ both put the playhead, and CUE moves it from
    * there the way the deck does.
    */
-  const [cuePoint, setCuePoint] = useState(0);
+  const { cuePoint, setCuePoint, initialiseCuePoint } = useCuePoint(`${gridSource}:${loadIntent}`);
   // Kept current by the backend: an edit from any deck refetches. The cue
   // point is settled from the first fetch only — see `useTrackCues`.
   const cues = useTrackCues(track, (loaded) => {
     const first = cuesFor(loaded, "memory")[0];
-    setCuePoint(first ? first.positionMs / 1000 : 0);
+    initialiseCuePoint(first ? first.positionMs / 1000 : 0);
   }, loadIntent);
   // Until the player menu turns it on, a saved loop is only a marker.
   const [activeLoopPlayback, setActiveLoopPlayback] = useState(false);
@@ -1405,7 +1406,7 @@ export const Player = memo(function Player({
     if (action.cuePoint !== cuePoint) setCuePoint(action.cuePoint);
     if (action.seekTo !== null) playback.seek(action.seekTo);
     if (action.playing !== playback.playing) playback.toggle();
-  }, [playback, cuePoint, quantize, quantizeGrid]);
+  }, [playback, cuePoint, quantize, quantizeGrid, setCuePoint]);
 
   const dropCue = useCallback(() => {
     const action = releaseCue(previewing.current, cuePoint);
@@ -1651,7 +1652,7 @@ export const Player = memo(function Player({
     const at = loopPoint();
     setLoopIn(at);
     if (!playback.loop?.active) setCuePoint(at);
-  }, [playback, loopPoint]);
+  }, [playback, loopPoint, setCuePoint]);
   const markLoopOut = useCallback(() => {
     if (playback.idle || loopIn === null) return;
     const out = loopPoint();
