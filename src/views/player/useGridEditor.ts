@@ -78,10 +78,11 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   // beat under the playhead at its first press.
   const pendingStretch = useRef<{ byMs: number; timeMs: number; fromMs: number | null } | null>(null);
   const target = gridSourceKey(trackId, deviceSource);
-  const scope = useMemo(() => ({ target }), [target]);
+  const scope = useMemo(() => ({ target, readOnly, canEdit }), [target, readOnly, canEdit]);
   const current = useRef<typeof scope | null>(null);
-  // Only a committed session owns queued work and replies. A speculative
-  // render cannot retire it, and returning to A starts a fresh session.
+  // Only a committed, permitted session owns queued work and replies. A
+  // speculative render cannot retire it; returning to A or changing write
+  // permission starts a fresh session without changing the grid's identity.
   useLayoutEffect(() => {
     current.current = scope;
     return () => { if (current.current === scope) current.current = null; };
@@ -94,11 +95,12 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     setTaps([]);
   }, []);
   useEffect(() => {
+    cancelTaps();
     pendingNudge.current = 0;
     nudgeQueued.current = false;
     pendingStretch.current = null;
     setNudging(false);
-  }, [target]);
+  }, [scope, cancelTaps]);
   useEffect(() => { setFromMs(null); cancelTaps(); return () => { if (tapTimer.current) clearTimeout(tapTimer.current); }; }, [target, cancelTaps]);
   useEffect(() => { if (readOnly || state?.locked) cancelTaps(); }, [readOnly, state?.locked, cancelTaps]);
 

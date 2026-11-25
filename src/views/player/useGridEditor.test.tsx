@@ -462,4 +462,41 @@ describe("grid edit session ownership", () => {
     ]);
   });
 
+  it.each(["protection", "lock"] as const)("rechecks current %s before a delayed tempo confirmation writes", async restriction => {
+    let finish: (allowed: boolean) => void = () => {};
+    confirm.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    mount({ dynamic: true }); act(() => grid.setBpm("128")); await settle();
+    mount({ dynamic: true, readOnly: restriction === "protection", state: gridState({ locked: restriction === "lock" }) });
+    await act(async () => { finish(true); await Promise.resolve(); }); await settle();
+    expect(edits.gridEdit).not.toHaveBeenCalled();
+  });
+
+  it("retires a protected queue and allows fresh nudge and stretch after unprotecting", async () => {
+    let finish: (state: GridState) => void = () => {};
+    edits.gridEdit.mockImplementationOnce(() => new Promise<GridState>(resolve => { finish = resolve; }));
+    mount(); act(() => grid.shift(1)); await settle();
+    act(() => { grid.shift(1); grid.stretch(1); });
+    mount({ readOnly: true });
+    expect(grid.nudging).toBe(false);
+    mount();
+    await act(async () => { finish(gridState()); await Promise.resolve(); }); await settle();
+    expect(edits.gridEdit).toHaveBeenCalledTimes(1);
+    act(() => grid.shift(-1)); await settle();
+    expect(grid.nudging).toBe(false);
+    act(() => grid.stretch(-1)); await settle();
+    expect(edits.gridEdit.mock.calls.map(call => call[1] as GridEdit)).toEqual([
+      { kind: "nudge", ms: SHIFT_MS }, { kind: "nudge", ms: -SHIFT_MS },
+      { kind: "stretch", byMs: 1, timeMs: 0 },
+    ]);
+  });
+
+  it("retains Adjust from scope across protection changes and allows unlocking", async () => {
+    mount(); playhead = 900; act(() => grid.adjustFrom()); await settle();
+    mount({ readOnly: true }); mount();
+    expect(grid.fromMs).toBe(900);
+    mount({ state: gridState({ locked: true }) });
+    act(() => grid.toggleLock()); await settle();
+    expect(edits.gridLock).toHaveBeenCalledWith("t1", false);
+  });
+
 });
