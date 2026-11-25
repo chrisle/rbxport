@@ -535,6 +535,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       };
       // What the deck holds right now, so a reload does not start at zero.
       const state = await backend.deckState();
+      if (!live) return;
       const deck = DECK === "b" ? state.b : state.a;
       const target = targetLoad.current;
       if (target !== null && deck.loadId !== undefined && deck.loadId !== target.loadId && !loadPending.current) {
