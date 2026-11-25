@@ -274,8 +274,8 @@ describe("SyncManager", () => {
   });
   it("lists missing source files in a dialog and requires confirmation before writing", async () => {
     validateExportFiles.mockResolvedValueOnce([
-      { title: "Missing One", path: "/Music/missing-one.mp3" },
-      { title: "Missing Two", path: "/Music/missing-two.wav" },
+      { id: "100001", title: "Missing One", path: "/Music/missing-one.mp3", playlists: [{ id: "p3", path: "Closing" }] },
+      { id: "100002", title: "Missing Two", path: "/Music/missing-two.wav", playlists: [{ id: "p3", path: "Closing" }] },
     ]);
     click(box("Closing"));
     click(box("USB B"));
@@ -295,7 +295,7 @@ describe("SyncManager", () => {
     expect(status()).toContain("Export cancelled because files are missing.");
   });
   it("syncs the rest when the missing files are skipped", async () => {
-    validateExportFiles.mockResolvedValueOnce([{ title: "Missing One", path: "/Music/missing-one.mp3" }]);
+    validateExportFiles.mockResolvedValueOnce([{ id: "100001", title: "Missing One", path: "/Music/missing-one.mp3", playlists: [{ id: "p3", path: "Closing" }] }]);
     click(box("Closing"));
     click(box("USB B"));
     await settle();

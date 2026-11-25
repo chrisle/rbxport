@@ -4576,3 +4576,45 @@ fn a_device_row_keeps_its_marker_when_loading_resolves_the_library_spelling() {
     assert_eq!(marked.as_slice(), std::slice::from_ref(&id));
     assert!(commands::loaded_rows(s.state(), s.player(), vec![id.clone()], vec![(id, 200)]).unwrap().is_empty());
 }
+
+#[test]
+fn missing_export_files_name_only_the_selected_containing_playlists() {
+    let s = shell();
+    let one = s._dir.path().join("ContextTrack One.wav");
+    let two = s._dir.path().join("ContextTrack Two.wav");
+    write_wav(&one, 1);
+    write_wav(&two, 1);
+    let imported = run(commands::import_files(s.handle(), s.state(), vec![one.display().to_string(), two.display().to_string()])).unwrap();
+    let x = imported.tracks[0].id.clone();
+    let y = imported.tracks[1].id.clone();
+    run(commands::create_folder(s.handle(), s.state(), "Shows".into(), ROOT.into())).unwrap();
+    let shows = s.node("Shows");
+    run(commands::create_playlist(s.handle(), s.state(), "Play".into(), shows.id.clone(), None)).unwrap();
+    let a = s.node("Play");
+    run(commands::create_folder(s.handle(), s.state(), "Archive".into(), ROOT.into())).unwrap();
+    let archive = s.node("Archive");
+    run(commands::create_playlist(s.handle(), s.state(), "Play".into(), archive.id, None)).unwrap();
+    let b = s.tree().into_iter().find(|node| node.name == "Play" && node.id != a.id).unwrap();
+    run(commands::create_playlist(s.handle(), s.state(), "Unselected".into(), ROOT.into(), None)).unwrap();
+    let outside = s.node("Unselected");
+    for (id, tracks) in [(a.id.clone(), vec![x.clone(), x.clone()]), (b.id.clone(), vec![x.clone(), y.clone()]), (outside.id, vec![x.clone()])] {
+        run(commands::add_tracks_to_playlist(s.handle(), s.state(), id, tracks, Some(true), None)).unwrap();
+    }
+    run(commands::create_smart_playlist(s.handle(), s.state(), "Rule".into(), ROOT.into(), smart_rule("name", "ContextTrack One"))).unwrap();
+    let smart = s.node("Rule");
+    assert_eq!(ids(&s.playlist_rows(&smart.id)), [x.as_str()]);
+    std::fs::remove_file(&one).unwrap();
+    std::fs::remove_file(&two).unwrap();
+    let missing = run(commands::validate_export_files(s.state(), vec![shows.id, a.id.clone(), b.id.clone(), smart.id.clone()])).unwrap();
+    let result = serde_json::to_value(missing).unwrap();
+    assert_eq!(result.as_array().unwrap().len(), 2);
+    let entry = |id: &str| result.as_array().unwrap().iter().find(|entry| entry["id"] == id).expect("preflight must retain each missing collection track ID");
+    assert_eq!(entry(&x)["playlists"], serde_json::json!([
+        { "id": a.id, "path": "Shows / Play" },
+        { "id": b.id, "path": "Archive / Play" },
+        { "id": smart.id, "path": "Rule" },
+    ]));
+    assert_eq!(entry(&y)["playlists"], serde_json::json!([
+        { "id": b.id, "path": "Archive / Play" },
+    ]));
+}

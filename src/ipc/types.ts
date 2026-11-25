@@ -1557,8 +1557,12 @@ export interface SyncDeviceReport {
 }
 
 export interface MissingExportFile {
+  /** Collection identity; distinct tracks may have the same title and path. */
+  id: string;
   title: string;
   path: string;
+  /** Only containing playlists in the requested export, in tree order. */
+  playlists: { id: string; path: string }[];
 }
 
 /** One playlist a stick was last synced with. */
