@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act } from "react";
+import { act, startTransition, StrictMode, Suspense } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -47,10 +47,13 @@ interface ProbeProps {
   state: GridState | null;
   readOnly: boolean;
   dynamic?: boolean;
+  suspend?: boolean;
 }
 
 /** Mounts the hook and hands the test what it returned. */
-function Probe({ trackId, deviceSource, state, readOnly, dynamic = false }: ProbeProps) {
+const never = new Promise<void>(() => {});
+
+function Probe({ trackId, deviceSource, state, readOnly, dynamic = false, suspend = false }: ProbeProps) {
   grid = useGridEditor({
     trackId, deviceSource,
     deck: "a",
@@ -62,13 +65,16 @@ function Probe({ trackId, deviceSource, state, readOnly, dynamic = false }: Prob
     isDynamicFrom: () => dynamic,
     onNudge,
   });
+  // A speculative render reaches the hook before suspending.
+  // eslint-disable-next-line @typescript-eslint/only-throw-error
+  if (suspend) throw never;
   return null;
 }
 
 function mount(props: Partial<ProbeProps> = {}) {
   const full: ProbeProps = { trackId: "t1", state: gridState(), readOnly: false, ...props };
   act(() => {
-    root.render(<Probe {...full} />);
+    root.render(<Suspense fallback={null}><Probe {...full} /></Suspense>);
   });
 }
 
@@ -331,4 +337,97 @@ describe("recovered grid control behavior", () => {
     act(() => grid.double()); await settle();
     expect(onError).toHaveBeenCalledWith("Could not update USB. The paired row changed.");
   });
+});
+
+
+describe("grid edit session ownership", () => {
+  it("retires queued edits and returned state across A to B to A", async () => {
+    let finish: (state: GridState) => void = () => {};
+    edits.gridEdit.mockImplementationOnce(() => new Promise<GridState>(resolve => { finish = resolve; }));
+    mount(); act(() => grid.double()); await settle();
+    act(() => grid.halve());
+    mount({ trackId: "t2" }); mount();
+    setState.mockClear(); onError.mockClear();
+    await act(async () => { finish(gridState({ bpmX100: 25600 })); await Promise.resolve(); }); await settle();
+    expect(edits.gridEdit).toHaveBeenCalledTimes(1);
+    expect(setState).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    act(() => grid.halve()); await settle();
+    expect(edits.gridEdit).toHaveBeenCalledTimes(2);
+    expect(setState).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report an old failure to the returned A session", async () => {
+    let fail: (error: Error) => void = () => {};
+    edits.gridEdit.mockImplementationOnce(() => new Promise<GridState>((_resolve, reject) => { fail = reject; }));
+    mount(); act(() => grid.double()); await settle();
+    mount({ trackId: "t2" }); mount(); onError.mockClear();
+    await act(async () => { fail(new Error("old grid failure")); await Promise.resolve(); }); await settle();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("keeps committed A active when a B render is abandoned", async () => {
+    mount();
+    const committed = grid;
+    await act(async () => {
+      startTransition(() => root.render(<Suspense fallback={null}><Probe
+        trackId="t2" state={gridState()} readOnly={false} suspend
+      /></Suspense>));
+      await Promise.resolve();
+    });
+    act(() => committed.double()); await settle();
+    expect(edits.gridEdit).toHaveBeenCalledWith("t1", { kind: "double" }, { deck: "a" });
+    expect(setState).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not notify after unmount", async () => {
+    let finish: (state: GridState) => void = () => {};
+    edits.gridEdit.mockImplementationOnce(() => new Promise<GridState>(resolve => { finish = resolve; }));
+    mount(); act(() => grid.double()); await settle();
+    act(() => root.render(null)); setState.mockClear(); onError.mockClear();
+    await act(async () => { finish(gridState()); await Promise.resolve(); }); await settle();
+    expect(setState).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+  it("does not clear a newer session's validation error when an old edit succeeds", async () => {
+    let finish: (state: GridState) => void = () => {};
+    edits.gridEdit.mockImplementationOnce(() => new Promise<GridState>(resolve => { finish = resolve; }));
+    mount(); act(() => grid.double()); await settle();
+    mount({ trackId: "t2" }); mount();
+    act(() => grid.setBpm("wrong"));
+    expect(onError).toHaveBeenLastCalledWith("Enter a BPM from 40 to 499.");
+    onError.mockClear();
+    await act(async () => { finish(gridState()); await Promise.resolve(); }); await settle();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("retires retained callbacks across A to B to A", async () => {
+    mount(); const old = grid.double;
+    mount({ trackId: "t2" }); mount();
+    act(() => old()); await settle();
+    expect(edits.gridEdit).not.toHaveBeenCalled();
+    act(() => grid.double()); await settle();
+    expect(edits.gridEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispatch after the old session's delayed confirmation", async () => {
+    let finish: (allowed: boolean) => void = () => {};
+    confirm.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    mount({ dynamic: true }); act(() => grid.setBpm("128")); await settle();
+    expect(confirm).toHaveBeenCalledTimes(1);
+    mount({ trackId: "t2" }); mount({ dynamic: true });
+    await act(async () => { finish(true); await Promise.resolve(); }); await settle();
+    expect(edits.gridEdit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the committed session usable through StrictMode setup and cleanup", async () => {
+    act(() => root.render(<StrictMode><Suspense fallback={null}><Probe
+      trackId="t1" state={gridState()} readOnly={false}
+    /></Suspense></StrictMode>));
+    act(() => grid.double()); await settle();
+    expect(edits.gridEdit).toHaveBeenCalledTimes(1);
+    expect(setState).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenLastCalledWith(null);
+  });
+
 });
