@@ -1475,27 +1475,41 @@ export const TrackTable = memo(function TrackTable({
   // A new artwork mode, then rekordbox's `movePositionToSelectedRow`: with a
   // selection, the first selected row goes to the top of the list and the
   // list back to its left edge, once the rows are their new height.
-  const topSelectedAfterResize = useRef<{ ids: ReadonlySet<string>; view: typeof view } | null>(null);
+  const topSelectedAfterResize = useRef<{ ids: ReadonlySet<string>; orderKey: string } | null>(null);
+  const { idsInRange } = view;
   const chooseArtworkMode = useCallback(
     (mode: ArtworkMode) => {
       if (mode === artworkMode || !onArtworkMode) return;
-      topSelectedAfterResize.current = selection.ids.size > 0 ? { ids: selection.ids, view } : null;
+      topSelectedAfterResize.current = selection.ids.size > 0 ? { ids: selection.ids, orderKey: view.orderKey } : null;
       onArtworkMode(mode);
     },
     [artworkMode, onArtworkMode, selection.ids, view],
   );
   useEffect(() => {
+    // A saved artwork layout can replace the view for extra columns while
+    // keeping its row order. Retry that handle without keeping an old lookup.
     const pending = topSelectedAfterResize.current;
-    topSelectedAfterResize.current = null;
-    if (!pending || pending.view.count === 0) return;
-    void pending.view.idsInRange(0, pending.view.count).then((all) => {
+    if (!pending) return;
+    if (pending.orderKey !== view.orderKey || pending.ids !== selection.ids) {
+      topSelectedAfterResize.current = null;
+      return;
+    }
+    if (view.swapping || view.count === 0) return;
+    let live = true;
+    void idsInRange(0, view.count).then((all) => {
+      if (!live || topSelectedAfterResize.current !== pending) return;
+      topSelectedAfterResize.current = null;
       const first = all.findIndex((id) => pending.ids.has(id));
       const el = scrollRef.current;
       if (first < 0 || !el) return;
       el.scrollTop = first * rowH;
       el.scrollLeft = 0;
+    }).catch(() => {
+      // A view closed before its lookup finished needs no scroll restore.
+      if (live && topSelectedAfterResize.current === pending) topSelectedAfterResize.current = null;
     });
-  }, [rowH]);
+    return () => { live = false; };
+  }, [rowH, view.orderKey, view.token, view.swapping, view.count, idsInRange, selection.ids]);
   const showsCollection = spec.source.kind === "collection";
   const locateLoaded = useCallback(() => {
     const step = locateStep(locateCursor.current, deckTrackIds);

@@ -130,15 +130,7 @@ const settle = async () => {
   });
 };
 
-let latest: {
-  count: number;
-  totals: { tracks: number; seconds: number; bytes: number } | undefined;
-  error: string | null;
-  loading: boolean;
-  rowAt: (i: number) => RowDto | undefined;
-  fresh: (i: number) => boolean;
-  recheckMissing: (trackId: string) => void;
-};
+let latest: import("./useTrackView").TrackView;
 
 /** The scroll position the stand-in table is showing. */
 let window_: { start: number; end: number } = { start: 0, end: 32 };
@@ -366,6 +358,8 @@ describe("useTrackView, when the library changes under an open view", () => {
   it("fetches the pages again when an extra column is shown", async () => {
     await opened();
     const before = opens;
+    const order = latest.orderKey;
+    const token = latest.token;
     // The spec the backend sees is the same; the rows it answers with are
     // not, since the column's field is only fetched when it is on show. The
     // pages kept from before have no such field, so they must be replaced —
@@ -373,10 +367,15 @@ describe("useTrackView, when the library changes under an open view", () => {
     stamp = " (with size)";
     extraColumns = ["size"];
     act(() => root.render(<Probe />));
+    expect(latest.swapping).toBe(true);
+    expect(latest.orderKey).toBe(order);
     expect(latest.rowAt(0)?.title).toBe("Track 0");
     await settle();
     await settle();
     expect(opens).toBe(before + 1);
+    expect(latest.token).not.toBe(token);
+    expect(latest.orderKey).toBe(order);
+    expect(latest.swapping).toBe(false);
     expect(latest.rowAt(0)?.title).toBe("Track 0 (with size)");
   });
 
@@ -455,10 +454,12 @@ describe("useTrackView, when a player or the menu tags a track", () => {
     act(() => root.render(<Probe />));
     await settle();
     const before = opens;
+    const order = latest.orderKey;
 
     await tagListChanged();
 
     expect(opens).toBe(before + 1);
+    expect(latest.orderKey).not.toBe(order);
   });
 });
 

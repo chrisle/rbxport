@@ -18,7 +18,7 @@ import { __setBackend } from "@/ipc/client";
 import { createMockBackend } from "@/ipc/backend-mock";
 import { PreferencesProvider } from "@/store/usePreferences";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
-import { defaultLayout, fullArtworkLayout, resolve, type ColumnSpec } from "@/lib/columns";
+import { defaultLayout, fullArtworkLayout, resolve, toggleColumn, type ColumnSpec } from "@/lib/columns";
 import type { ArtworkMode } from "@/lib/session";
 import {
   columnsForArtworkMode, fullArtworkWidth, previewBand, rowHeightForArtworkMode, TrackTable,
@@ -42,6 +42,8 @@ const settle = async () => {
 };
 
 function render(props: {
+  spec?: ViewSpec;
+  libraryGeneration?: number;
   artworkMode?: ArtworkMode;
   onArtworkMode?: (mode: ArtworkMode) => void;
   columns?: readonly ColumnSpec[];
@@ -57,7 +59,7 @@ function render(props: {
         reset: noop,
       }}>
         <TrackTable
-          spec={COLLECTION}
+          spec={props.spec ?? COLLECTION}
           onSortChange={noop}
           title="Collection"
           query=""
@@ -68,7 +70,7 @@ function render(props: {
           onColumnToggle={noop}
           onColumnAutoSize={noop}
           onColumnAutoSizeAll={noop}
-          libraryGeneration={0}
+          libraryGeneration={props.libraryGeneration ?? 0}
           onRate={noop}
           {...(props.artworkMode ? { artworkMode: props.artworkMode } : {})}
           {...(props.onArtworkMode ? { onArtworkMode: props.onArtworkMode } : {})}
@@ -183,6 +185,117 @@ describe("artwork display pattern", () => {
     const full = Number.parseInt(rowHeight(), 10);
     expect(scroller.scrollTop).toBe(5 * full);
     expect(scroller.scrollLeft).toBe(0);
+  });
+
+  it("restores the selection when a saved artwork layout opens a view for extra columns", async () => {
+    const backend = createMockBackend({ trackCount: 400, latencyMs: 0, writable: true });
+    const idsInRange = backend.viewIdsInRange.bind(backend);
+    const openView = backend.openView.bind(backend);
+    let holdNext = false;
+    let holdOpen = false;
+    let projectionPending = false;
+    let obsoleteReads = 0;
+    let finish: (() => void) | undefined;
+    let finishOpen: (() => void) | undefined;
+    backend.openView = async (...args) => {
+      if (holdOpen) {
+        holdOpen = false;
+        projectionPending = true;
+        await new Promise<void>((resolve) => { finishOpen = resolve; });
+        projectionPending = false;
+      }
+      return openView(...args);
+    };
+    backend.viewIdsInRange = async (...args) => {
+      if (projectionPending) {
+        obsoleteReads += 1;
+        throw new Error("the previous view closed during projection replacement");
+      }
+      const ids = await idsInRange(...args);
+      if (!holdNext) return ids;
+      holdNext = false;
+      return new Promise<string[]>((resolve) => { finish = () => resolve(ids); });
+    };
+    __setBackend(backend);
+    let mode: ArtworkMode = "partial";
+    const customColumns = resolve(toggleColumn(fullArtworkLayout(defaultLayout(), true), "composer", "full"), "full");
+    const rerender = () => render({ artworkMode: mode, columns: mode === "full" ? customColumns : columns,
+      onArtworkMode: next => { mode = next; rerender(); } });
+    rerender();
+    await settle(); await settle();
+    const row = host.querySelectorAll<HTMLElement>('[role="row"][aria-selected]')[5];
+    if (!row) throw new Error("fixture row missing");
+    act(() => {
+      row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+      row.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
+      row.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    });
+    await settle();
+    holdNext = true;
+    holdOpen = true;
+    act(() => button("full")?.click());
+    await settle(); await settle();
+    expect(finishOpen).toBeDefined();
+    expect(obsoleteReads).toBe(0);
+    expect(finish).toBeUndefined();
+    act(() => finishOpen?.());
+    await settle(); await settle();
+    expect(finish).toBeDefined();
+    act(() => finish?.());
+    await settle();
+    const scroller = host.querySelector('[data-testid="track-scroll"]') as HTMLElement;
+    expect(scroller.scrollTop).toBe(5 * Number.parseInt(rowHeight(), 10));
+  });
+
+  it.each(["mode", "source", "selection", "generation"] as const)("ignores an artwork resize lookup after its %s changes", async (change) => {
+    const backend = createMockBackend({ trackCount: 400, latencyMs: 0, writable: true, playlistFixture: "cueOnly" });
+    const idsInRange = backend.viewIdsInRange.bind(backend);
+    let holdNext = false;
+    let finish: (() => void) | undefined;
+    backend.viewIdsInRange = async (...args) => {
+      const ids = await idsInRange(...args);
+      if (!holdNext) return ids;
+      holdNext = false;
+      return new Promise<string[]>((resolve) => { finish = () => resolve(ids); });
+    };
+    __setBackend(backend);
+    let mode: ArtworkMode = "partial";
+    let spec = COLLECTION;
+    let generation = 0;
+    const rerender = () => render({ spec, libraryGeneration: generation, artworkMode: mode, onArtworkMode: (next) => { mode = next; rerender(); } });
+    const select = (index: number) => {
+      const row = host.querySelectorAll<HTMLElement>('[role="row"][aria-selected]')[index];
+      if (!row) throw new Error("fixture row missing");
+      act(() => {
+        row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+        row.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
+        row.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+      });
+    };
+    rerender();
+    await settle(); await settle();
+    select(5);
+    await settle();
+    holdNext = true;
+    act(() => button("full")?.click());
+    await settle(); await settle();
+    expect(finish).toBeDefined();
+    if (change === "mode") act(() => button("partial")?.click());
+    else if (change === "source") {
+      spec = { ...COLLECTION, source: { kind: "playlist", id: "cue" } };
+      rerender();
+    } else if (change === "generation") {
+      generation += 1;
+      rerender();
+    } else select(7);
+    await settle(); await settle();
+    const scroller = host.querySelector('[data-testid="track-scroll"]') as HTMLElement;
+    scroller.scrollTop = 73;
+    scroller.scrollLeft = 31;
+    act(() => finish?.());
+    await settle();
+    expect(scroller.scrollTop).toBe(73);
+    expect(scroller.scrollLeft).toBe(31);
   });
 });
 

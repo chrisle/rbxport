@@ -17,6 +17,10 @@ export interface TrackView {
   count: number;
   /** Identity of the current view's data; changes whenever rows must be refetched. */
   token: CacheToken;
+  /** Source and row-order identity, excluding extra requested display columns. */
+  orderKey: string;
+  /** The requested view, including its display columns, is not yet open. */
+  swapping: boolean;
   loading: boolean;
   /** Identity of the source (not its sort or query); a new one is a different list. */
   sourceKey: string;
@@ -105,13 +109,14 @@ export function useTrackView(
   // The library generation is part of the key: an edit changes the rows under
   // a spec that has not itself changed, and without this the view would keep
   // serving the pages it cached before the edit.
-  const specKey = useMemo(
+  const orderKey = useMemo(
     () =>
       JSON.stringify([
-        spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter ?? null, libraryGeneration, tagListKey, extraKey,
+        spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter ?? null, libraryGeneration, tagListKey,
       ]),
-    [spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter, libraryGeneration, tagListKey, extraKey],
+    [spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter, libraryGeneration, tagListKey],
   );
+  const specKey = useMemo(() => JSON.stringify([orderKey, extraKey]), [orderKey, extraKey]);
 
   // Where the rows come from, apart from how they are sorted, searched or
   // filtered. Only a change of source empties the cache: one playlist's rows
@@ -392,6 +397,8 @@ export function useTrackView(
     () => ({
       count: rows ? seedCount : state.count,
       token,
+      orderKey,
+      swapping,
       // Loading is a change of source, where there is nothing to draw until
       // the open answers. The same source fetched again — an edit, a sort,
       // a keystroke — keeps its rows and count on screen meanwhile.
@@ -405,7 +412,7 @@ export function useTrackView(
       idsInRange,
       recheckMissing,
     }),
-    [rows, seedCount, state.count, state.sourceKey, state.totals, state.error, token, sourceKey, rowAt, fresh, ensureRange, idsInRange, recheckMissing],
+    [rows, seedCount, state.count, state.sourceKey, state.totals, state.error, token, orderKey, swapping, sourceKey, rowAt, fresh, ensureRange, idsInRange, recheckMissing],
   );
 }
 
