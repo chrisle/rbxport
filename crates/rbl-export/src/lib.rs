@@ -308,11 +308,9 @@ fn dir_name(name: &str) -> String {
     if safe.chars().count() <= DIR_NAME_MAX {
         return safe;
     }
-    let mut cut: String = safe.chars().take(DIR_NAME_MAX).collect();
-    while cut.ends_with('.') || cut.ends_with(' ') {
-        cut.pop();
-    }
-    if cut.is_empty() { "Unknown".to_owned() } else { cut }
+    let cut: String = safe.chars().take(DIR_NAME_MAX).collect();
+    // The cut can turn a longer, ordinary name into a reserved basename.
+    fat_safe(&cut)
 }
 
 /// Makes a name safe for FAT32, which is what a DJ stick is formatted as.
@@ -375,6 +373,11 @@ fn fat_file_name(name: &str) -> String {
     let mut shortened = stem[..end].trim_end_matches(['.', ' ']).to_owned();
     if shortened.is_empty() { shortened.push_str("Unknown"); }
     shortened.push_str(&suffix);
+    if is_reserved_device_name(shortened.split('.').next().unwrap_or(&shortened)) {
+        // Budget the escape prefix before cutting, rather than adding a byte
+        // beyond the limit. The leading underscore makes this a single retry.
+        return fat_file_name(&format!("_{safe}"));
+    }
     shortened
 }
 
@@ -3291,6 +3294,24 @@ mod tests {
         assert_eq!(fat_safe("Content"), "Content");
         assert_eq!(fat_safe("COM10"), "COM10");
         assert_eq!(fat_safe("CONTACT"), "CONTACT");
+    }
+
+    #[test]
+    fn truncation_cannot_create_a_reserved_device_basename() {
+        for base in ["CON", "NUL", "AUX", "com1", "LPT¹"] {
+            let original = format!("{base}{}Band", " ".repeat(DIR_NAME_MAX - base.chars().count()));
+            assert_eq!(dir_name(&original), format!("_{base}"));
+            let filename = format!("{base}{}x.mp3", " ".repeat(FILE_NAME_MAX - 4 - base.len()));
+            assert_eq!(fat_file_name(&filename), format!("_{base}.mp3"));
+        }
+        let allowed = format!("COM⁴{}Band", " ".repeat(DIR_NAME_MAX - 4));
+        assert_eq!(dir_name(&allowed), "COM⁴");
+        assert_eq!(fat_file_name("CON Band.mp3"), "CON Band.mp3");
+        let extension = "e".repeat(FILE_NAME_MAX - 5);
+        let original = format!("COM1X.{extension}");
+        let escaped = fat_file_name(&original);
+        assert_eq!(escaped, format!("_COM.{extension}"));
+        assert_eq!(escaped.len(), FILE_NAME_MAX);
     }
 
     #[test]
