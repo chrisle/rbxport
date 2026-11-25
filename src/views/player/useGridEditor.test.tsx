@@ -430,4 +430,36 @@ describe("grid edit session ownership", () => {
     expect(onError).toHaveBeenLastCalledWith(null);
   });
 
+  it("retired local controls cannot nudge, validate, tap, or change scope on fresh A", async () => {
+    mount(); const old = grid;
+    mount({ trackId: "t2" }); mount();
+    playhead = 1400;
+    act(() => grid.adjustFrom()); await settle();
+    expect(grid.fromMs).toBe(1400);
+    setState.mockClear(); onError.mockClear(); onNudge.mockClear(); edits.gridEdit.mockClear();
+    act(() => { old.shift(1); old.setBpm("bad"); old.tap(); old.adjustAll(); });
+    await settle();
+    expect(onNudge).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(grid.nudging).toBe(false);
+    expect(grid.fromMs).toBe(1400);
+    expect(edits.gridEdit).not.toHaveBeenCalled();
+    act(() => grid.adjustAll());
+    act(() => grid.tap()); tick(500); act(() => grid.tap()); await settle();
+    expect(grid.tapBpmX100).toBe(12000);
+  });
+
+  it("a retired stretch cannot join the fresh session's waiting batch", async () => {
+    mount(); const old = grid;
+    mount({ trackId: "t2" }); mount();
+    let finish: (state: GridState) => void = () => {};
+    edits.gridEdit.mockImplementationOnce(() => new Promise<GridState>(resolve => { finish = resolve; }));
+    act(() => grid.double()); await settle();
+    act(() => { grid.stretch(1); old.stretch(1); });
+    await act(async () => { finish(gridState()); await Promise.resolve(); }); await settle();
+    expect(edits.gridEdit.mock.calls.map(call => call[1] as GridEdit)).toEqual([
+      { kind: "double" }, { kind: "stretch", byMs: -1, timeMs: 0 },
+    ]);
+  });
+
 });

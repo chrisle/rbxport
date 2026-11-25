@@ -86,6 +86,7 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     current.current = scope;
     return () => { if (current.current === scope) current.current = null; };
   }, [scope]);
+  const isCurrent = useCallback(() => current.current === scope, [scope]);
   const cancelTaps = useCallback(() => {
     if (tapTimer.current) clearTimeout(tapTimer.current);
     tapTimer.current = null;
@@ -104,25 +105,25 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
   // A null result is an action that had nothing to send.
   const run = useCallback((action: (edits: Awaited<ReturnType<typeof getBackend>>["edits"]) => Promise<GridState | null>,
     after?: () => void, done?: () => void) => {
-    if (current.current !== scope) return;
+    if (!isCurrent()) return;
     queue.current = queue.current.then(async () => {
       try {
-        if (current.current !== scope) return;
+        if (!isCurrent()) return;
         const backend = await getBackend();
-        if (current.current !== scope) return;
+        if (!isCurrent()) return;
         const next = await action(backend.edits);
-        if (current.current !== scope || next === null) return;
+        if (!isCurrent() || next === null) return;
         setState(next);
         after?.();
         onError?.(null);
-      } catch (error) { if (current.current === scope) onError?.(errorMessage(error).trim() || errorMessage(null)); }
-      finally { if (current.current === scope) done?.(); }
+      } catch (error) { if (isCurrent()) onError?.(errorMessage(error).trim() || errorMessage(null)); }
+      finally { if (isCurrent()) done?.(); }
     });
-  }, [scope, setState, onError]);
+  }, [isCurrent, setState, onError]);
   // `take` names the edit when its turn in the queue comes, so presses made
   // while it waited can still join it; null sends nothing.
   const send = useCallback((take: () => { change: GridEdit; transaction?: string | undefined } | null, boundary: number | null, after?: () => void) => {
-    if (!canEdit || trackId === null) return;
+    if (!isCurrent() || !canEdit || trackId === null) return;
     const options: GridEditOptions = { deck: deckId };
     if (deviceSource) options.deviceSource = deviceSource;
     if (deck.durationMs !== undefined) options.durationMs = deck.durationMs;
@@ -140,20 +141,26 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
         // every tempo edit over tempo changes failed with "could not be
         // saved" (#107; the macOS edit that did nothing in #86 fits too).
         const question = t("This section has tempo changes. Replace them with a constant tempo?");
-        const allowed = await (confirmDynamic?.() ?? (await getBackend()).confirm(question));
-        if (current.current !== scope) return null;
+        let allowed: boolean;
+        if (confirmDynamic) allowed = await confirmDynamic();
+        else {
+          const backend = await getBackend();
+          if (!isCurrent()) return null;
+          allowed = await backend.confirm(question);
+        }
+        if (!isCurrent()) return null;
         if (!allowed) return state;
         options.allowDynamic = true;
       }
       return edits.gridEdit(trackId, change, options);
     }, after);
-  }, [canEdit, trackId, deviceSource, deckId, run, isDynamicFrom, confirmDynamic, state, scope, deck.durationMs, t]);
+  }, [canEdit, trackId, deviceSource, deckId, run, isDynamicFrom, confirmDynamic, state, isCurrent, deck.durationMs, t]);
   const edit = useCallback((change: GridEdit, boundary = fromMs, transaction?: string, after?: () => void) => {
     send(() => ({ change, transaction }), boundary, after);
   }, [send, fromMs]);
   const mark = useCallback(() => { if (fromMs === null) edit({ kind: "downbeat", timeMs: playheadMs() }); }, [edit, fromMs, playheadMs]);
   const shift = useCallback((direction: -1 | 1, held = false) => {
-    if (fromMs !== null || !canEdit || trackId === null) return;
+    if (!isCurrent() || fromMs !== null || !canEdit || trackId === null) return;
     const ms = direction * (held ? HELD_SHIFT_MS : SHIFT_MS);
     onNudge?.(ms);
     pendingNudge.current += ms;
@@ -171,9 +178,9 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
       pendingNudge.current = 0;
       return sum === 0 ? Promise.resolve(null) : edits.gridEdit(trackId, { kind: "nudge", ms: sum }, options);
     }, undefined, () => { if (!nudgeQueued.current) setNudging(false); });
-  }, [fromMs, canEdit, trackId, deviceSource, onNudge, deck.durationMs, run]);
+  }, [fromMs, canEdit, trackId, deviceSource, onNudge, deck.durationMs, run, isCurrent]);
   const stretch = useCallback((direction: -1 | 1, held = false) => {
-    if (!canEdit || trackId === null) return;
+    if (!isCurrent() || !canEdit || trackId === null) return;
     const byMs = -direction * (held ? HELD_SHIFT_MS : SHIFT_MS);
     const open = pendingStretch.current;
     // The backend moves the target beat at most MAX_STRETCH_MS a save, so a
@@ -188,24 +195,25 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
       if (pendingStretch.current === batch) pendingStretch.current = null;
       return batch.byMs === 0 ? null : { change: { kind: "stretch", byMs: batch.byMs, timeMs: batch.timeMs } };
     }, fromMs);
-  }, [canEdit, trackId, fromMs, playheadMs, send]);
+  }, [canEdit, trackId, fromMs, playheadMs, send, isCurrent]);
   const double = useCallback(() => edit({ kind: "double" }), [edit]);
   const halve = useCallback(() => edit({ kind: "halve" }), [edit]);
-  const adjustAll = useCallback(() => { if (canEdit) { cancelTaps(); setFromMs(null); } }, [canEdit, cancelTaps]);
+  const adjustAll = useCallback(() => { if (isCurrent() && canEdit) { cancelTaps(); setFromMs(null); } }, [canEdit, cancelTaps, isCurrent]);
   const adjustFrom = useCallback(() => {
-    if (!canEdit) return;
+    if (!isCurrent() || !canEdit) return;
     cancelTaps();
     const at = playheadMs();
     edit({ kind: "align", timeMs: at }, at, undefined, () => setFromMs(at));
-  }, [canEdit, cancelTaps, playheadMs, edit]);
+  }, [canEdit, cancelTaps, playheadMs, edit, isCurrent]);
   const align = useCallback(() => { if (fromMs === null) edit({ kind: "align", timeMs: playheadMs() }); }, [edit, fromMs, playheadMs]);
   const setBpm = useCallback((value: string) => {
+    if (!isCurrent()) return;
     const bpm = Number(value);
     if (!value.trim() || !Number.isFinite(bpm) || bpm < 40 || bpm > 499) { onError?.("Enter a BPM from 40 to 499."); return; }
     edit({ kind: "tempo", bpmX100: Math.round(bpm * 100), anchorMs: fromMs ?? 0 });
-  }, [edit, fromMs, onError]);
+  }, [edit, fromMs, onError, isCurrent]);
   const tap = useCallback(() => {
-    if (!canEdit || fromMs !== null) return;
+    if (!isCurrent() || !canEdit || fromMs !== null) return;
     const next = withTap(tapsRef.current, performance.now());
     if (next.length === 1) { tapAnchor.current = playheadMs(); tapRun.current++; }
     tapsRef.current = next;
@@ -214,11 +222,11 @@ export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
     if (next.length) tapTimer.current = setTimeout(cancelTaps, tapTimeout(next));
     const bpmX100 = tapTempo(next);
     if (bpmX100 !== null) edit({ kind: "tap", bpm: 60_000 * (next.length - 1) / (next[next.length - 1]! - next[0]!), anchorMs: tapAnchor.current }, null, `${session.current}:${deckId}:${trackId}:${tapRun.current}`);
-  }, [canEdit, fromMs, playheadMs, cancelTaps, edit, deckId, trackId]);
-  const undo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => deviceSource ? edits.gridUndo(trackId, deckId, deviceSource) : edits.gridUndo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, deviceSource, run, cancelTaps]);
-  const redo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => deviceSource ? edits.gridRedo(trackId, deckId, deviceSource) : edits.gridRedo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, deviceSource, run, cancelTaps]);
+  }, [canEdit, fromMs, playheadMs, cancelTaps, edit, deckId, trackId, isCurrent]);
+  const undo = useCallback(() => { if (isCurrent() && hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => deviceSource ? edits.gridUndo(trackId, deckId, deviceSource) : edits.gridUndo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, deviceSource, run, cancelTaps, isCurrent]);
+  const redo = useCallback(() => { if (isCurrent() && hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => deviceSource ? edits.gridRedo(trackId, deckId, deviceSource) : edits.gridRedo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, deviceSource, run, cancelTaps, isCurrent]);
   const toggleLock = useCallback(() => {
-    if (hasGrid && !readOnly && trackId !== null && state !== null && state.lockable !== false) { cancelTaps(); run(edits => edits.gridLock(trackId, !state.locked)); }
-  }, [hasGrid, readOnly, trackId, state, cancelTaps, run]);
+    if (isCurrent() && hasGrid && !readOnly && trackId !== null && state !== null && state.lockable !== false) { cancelTaps(); run(edits => edits.gridLock(trackId, !state.locked)); }
+  }, [hasGrid, readOnly, trackId, state, cancelTaps, run, isCurrent]);
   return { state, nudging, hasGrid, canEdit, fromMs, tapBpmX100: tapTempo(taps), tap, mark, shift, stretch, double, halve, adjustAll, adjustFrom, align, setBpm, undo, redo, toggleLock };
 }
