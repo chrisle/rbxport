@@ -11,7 +11,9 @@ let drawnHeight: number | null;
 let renderedHeights: number[];
 let showHeights: (heights: readonly number[]) => void;
 let changed: (id: string) => void;
-let show: (palette: "3band" | "blue", id?: string, height?: number, startupCache?: boolean) => void;
+let show: (
+  palette: "3band" | "blue", id?: string, height?: number, startupCache?: boolean,
+) => void;
 let resetBackend: () => void;
 const read = vi.fn<(id: string, kind: WaveformKind) => Promise<Uint8Array>>();
 const drain = () => act(async () => { await vi.advanceTimersByTimeAsync(100); });
@@ -24,7 +26,9 @@ function deferred() {
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   vi.useFakeTimers(); vi.resetModules();
-  drawn = null; drawnHeight = null; renderedHeights = [];
+  drawn = null;
+  drawnHeight = null;
+  renderedHeights = [];
   read.mockReset().mockImplementation((_id, kind) => Promise.resolve(new Uint8Array([kind === "bands" ? 11 : 22])));
   const bitmaps = new WeakMap<HTMLCanvasElement, number>();
   const heights = new WeakMap<HTMLCanvasElement, number>();
@@ -32,13 +36,17 @@ beforeEach(async () => {
     ...await importOriginal<typeof import("@/canvas")>(),
     renderPreview: (bytes: Uint8Array, width: number, height: number) => {
       const bitmap = document.createElement("canvas"); bitmaps.set(bitmap, bytes[0]!);
-      heights.set(bitmap, height); renderedHeights.push(height);
+      heights.set(bitmap, height);
+      renderedHeights.push(height);
       return Promise.resolve({ bitmap, width, height });
     },
   }));
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     clearRect: () => { drawn = null; },
-    drawImage: (bitmap: HTMLCanvasElement) => { drawn = bitmaps.get(bitmap)!; drawnHeight = heights.get(bitmap)!; },
+    drawImage: (bitmap: HTMLCanvasElement) => {
+      drawn = bitmaps.get(bitmap)!;
+      drawnHeight = heights.get(bitmap)!;
+    },
   } as unknown as CanvasRenderingContext2D);
   const { __setBackend } = await import("@/ipc/client");
   __setBackend({ trackWaveform: read, onAnalysisChanged: (listener: (id: string) => void) => { changed = listener; return () => {}; } } as unknown as Backend);
@@ -113,24 +121,47 @@ it.each([false, true])("retains same-key pixels during incidental rerenders unti
 
 
 it.each([false, true])("keeps native-height bitmaps and return hits for each height (startup=%s)", async startup => {
-  show("3band", "height-source", 20, startup); await drain(); expect(drawnHeight).toBe(20);
-  show("3band", "height-source", 40, startup); await drain(); expect(drawnHeight).toBe(40);
+  show("3band", "height-source", 20, startup);
+  await drain();
+  expect(drawnHeight).toBe(20);
+  show("3band", "height-source", 40, startup);
+  await drain();
+  expect(drawnHeight).toBe(40);
   expect(renderedHeights).toEqual([20, 40]);
-  show("3band", "height-source", 20, startup); await drain(); expect(drawnHeight).toBe(20);
+  show("3band", "height-source", 20, startup);
+  await drain();
+  expect(drawnHeight).toBe(20);
   expect(read).toHaveBeenCalledTimes(2);
 });
 
 it("deduplicates equal-height pending requests without merging different heights", async () => {
-  const pending = deferred(); read.mockReturnValue(pending.promise);
-  showHeights([20, 40, 20]); await drain(); expect(read).toHaveBeenCalledTimes(2);
-  pending.resolve(new Uint8Array([11])); await drain(); expect(renderedHeights).toEqual([20, 40]);
+  const pending = deferred();
+  read.mockReturnValue(pending.promise);
+  showHeights([20, 40, 20]);
+  await drain();
+  expect(read).toHaveBeenCalledTimes(2);
+  pending.resolve(new Uint8Array([11]));
+  await drain();
+  expect(renderedHeights).toEqual([20, 40]);
 });
 
 it("separates startup and live sizes and invalidates all heights for a changed track", async () => {
-  for (const startup of [true, false]) for (const height of [20, 40]) { show("3band", "height-source", height, startup); await drain(); }
-  expect(read).toHaveBeenCalledTimes(4); expect(renderedHeights).toEqual([20, 40, 20, 40]);
-  show("3band", "height-source", 20, true); await drain(); expect(read).toHaveBeenCalledTimes(4);
-  act(() => changed("height-source")); await drain(); expect(read).toHaveBeenCalledTimes(5);
-  show("3band", "height-source", 40, false); await drain(); expect(read).toHaveBeenCalledTimes(6);
+  for (const startup of [true, false]) {
+    for (const height of [20, 40]) {
+      show("3band", "height-source", height, startup);
+      await drain();
+    }
+  }
+  expect(read).toHaveBeenCalledTimes(4);
+  expect(renderedHeights).toEqual([20, 40, 20, 40]);
+  show("3band", "height-source", 20, true);
+  await drain();
+  expect(read).toHaveBeenCalledTimes(4);
+  act(() => changed("height-source"));
+  await drain();
+  expect(read).toHaveBeenCalledTimes(5);
+  show("3band", "height-source", 40, false);
+  await drain();
+  expect(read).toHaveBeenCalledTimes(6);
   expect(drawnHeight).toBe(40);
 });

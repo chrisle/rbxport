@@ -194,7 +194,6 @@ export const WaveformPreview = memo(function WaveformPreview({
     const dpr = window.devicePixelRatio || 1;
     const key = `${startupCache ? "startup" : "live"}:${palette}:${half ? "half" : "full"}:${WaveformCache.key(trackId, width, height, dpr)}`;
 
-    const identity = key;
     const clear = () => {
       const canvas = ref.current;
       if (!canvas || cancelled || !painted.current) return;
@@ -208,7 +207,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(entry.bitmap, 0, 0, canvas.width, canvas.height);
-      painted.current = identity;
+      painted.current = key;
       // A cue without a colour of its own takes its slot's HOT CUE color
       // default, as rekordbox's row preview does.
       const badges = hotCues.map(([letter, at, colour, loop]) =>
@@ -241,7 +240,7 @@ export const WaveformPreview = memo(function WaveformPreview({
     visibleRows.set(trackId, listeners);
     // The canvas survives palette/track changes. Its previous pixels must
     // not stand in for a different format while that request is unavailable.
-    if (painted.current !== identity) clear();
+    if (painted.current !== key) clear();
     refresh();
 
     return () => {
