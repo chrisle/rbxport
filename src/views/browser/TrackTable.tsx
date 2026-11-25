@@ -2478,7 +2478,9 @@ export const TrackTable = memo(function TrackTable({
 
       {filterOpen ? filterBar : null}
 
-      <div className={styles.scroll} ref={scrollRef} data-testid="track-scroll" role="grid" aria-rowcount={view.count}>
+      <div className={styles.scroll} ref={scrollRef} data-testid="track-scroll"
+        data-file-drop-playlist={onDropFiles ? (spec.source.kind === "collection" ? "all" : spec.source.kind === "playlist" ? spec.source.id : undefined) : undefined}
+        role="grid" aria-rowcount={view.count}>
         {/*
           Inside the scroller, not above it. As a sibling it stayed put while
           the rows moved sideways, so every column sheared away from its own

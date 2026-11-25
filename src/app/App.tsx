@@ -1416,16 +1416,10 @@ function AppBody() {
 
   useEffect(() => subscribeNativeFileDrops((drop) => {
     const target = document.elementFromPoint(drop.x, drop.y);
-    const row = target?.closest<HTMLElement>("[data-file-drop-playlist]");
-    const dropTarget = row?.dataset.fileDropPlaylist
-      ?? (target?.closest('[data-testid="track-scroll"]') && selectedNode?.kind === "playlist"
-        ? selectedNode.id
-        : target?.closest('[data-testid="track-scroll"]') && selectedNode?.kind === "allTracks"
-          ? "all"
-        : undefined);
+    const dropTarget = target?.closest<HTMLElement>("[data-file-drop-playlist]")?.dataset.fileDropPlaylist;
     if (dropTarget) importDroppedPaths(dropTarget, drop.paths);
     else refuse(t("Drop files or folders onto All Tracks or a playlist to import them."));
-  }), [selectedNode, importDroppedPaths, refuse, t]);
+  }), [importDroppedPaths, refuse, t]);
 
   /**
    * Files dropped into the open All Tracks or playlist list follow the same

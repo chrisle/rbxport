@@ -238,6 +238,7 @@ export const SubBrowser = memo(function SubBrowser({
   const dropFilesIntoPlaylist = useCallback(
     (files: File[]) => {
       if (spec.source.kind === "playlist") list.onDropFilesIntoPlaylist(spec.source.id, files);
+      else if (spec.source.kind === "collection") list.onDropFilesIntoPlaylist("all", files);
     },
     [list, spec.source],
   );
@@ -317,7 +318,7 @@ export const SubBrowser = memo(function SubBrowser({
         {...list}
         onDropTracks={selected?.kind === "playlist" ? list.onDropTracks : undefined}
         onDropFiles={
-          !list.readOnly && spec.source.kind === "playlist" ? dropFilesIntoPlaylist : undefined
+          !list.readOnly && (spec.source.kind === "playlist" || selected?.kind === "allTracks") ? dropFilesIntoPlaylist : undefined
         }
         onRemoveFromPlaylist={removeFromPlaylist}
         onRemoveFromHistory={removeFromHistory}
