@@ -168,7 +168,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
   // of rekordbox's process lock instead of relying on the main window.
   // Unknown is locked: do not briefly enable SYNC before the first check.
   const [rekordboxOpen, setRekordboxOpen] = useState<boolean | null>(null);
-  const [operation, setOperation] = useState<"sync" | "import" | "eject" | "format" | "itunes" | null>(null);
+  const [operation, setOperation] = useState<"sync" | "sync-refresh" | "import" | "eject" | "format" | "itunes" | null>(null);
   // The iTunes / Music library shown in the left column, its ticks, and which
   // of its folders are closed. Null until the auto-detect answers, or when no
   // shared Library.xml is found and the DJ has not chosen one.
@@ -791,6 +791,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
             t("Some tracks were left out"),
           );
         }
+        // The write is complete. Keep the same operation lock until the
+        // device list and contents have caught up, without calling it syncing.
+        setOperation("sync-refresh");
         // What the sticks hold now, without touching the ticks.
         await refreshDevices().catch(() => {});
         await Promise.all(reports.filter(r => !r.ejected).map(({ path }) => readDevice(path, false).catch(() => {})));
@@ -1069,7 +1072,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
             aria-busy={busy || undefined}
             aria-describedby="sync-selection-hint"
           >
-            {operation === "sync" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Syncing…</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
+            {operation === "sync" || operation === "sync-refresh" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> {t(operation === "sync-refresh" ? "Refreshing…" : "Syncing…")}</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
           </button>
           <button type="button" className={`${styles.button} ${styles.actionPreferences}`} onClick={() => openUsbExportPreferences("usbExportSync")}
             aria-label={t("Change sync preferences")} title={t("Change sync preferences")}>

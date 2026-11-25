@@ -1619,3 +1619,74 @@ it("preserves current device removal and retires a failed winning refresh", asyn
   expect(syncButton()?.disabled).toBe(true);
   expect(host.textContent).not.toContain("Couldn’t read USB devices.");
 });
+
+
+describe("post-sync device refresh ownership", () => {
+  it.each(["discovery", "contents"] as const)("distinguishes a completed export from pending %s refresh", async (stage) => {
+    click(box("Closing"));
+    click(box("USB B"));
+    await settle();
+    const backend = await getBackend();
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const readState = vi.spyOn(backend, "deviceSyncState");
+    syncDevices.mockImplementationOnce(() => {
+      if (stage === "discovery") listDevices.mockImplementationOnce(async () => { await pending; return DEVICES; });
+      else readState.mockImplementationOnce(async () => { await pending; return UNRECORDED["/Volumes/USB B"]!; });
+      exportProgress?.({ path: "/Volumes/USB B", state: "done", done: 10, total: 10, title: "", jobId: "1", sequence: 2 });
+      return Promise.resolve([report("/Volumes/USB B", 10)]);
+    });
+    const sync = syncButton()!;
+    click(sync);
+    await settle();
+    await settle();
+    const meter = host.querySelector<HTMLProgressElement>('progress[aria-label="Exporting USB B"]');
+    expect(status()).toBe("Sync complete.");
+    expect(meter?.dataset.state).toBe("done");
+    expect(meter?.value).toBe(100);
+    expect(host.querySelector('[aria-label="USB B export report"]')?.textContent).toContain("10 tracks added");
+    expect(sync.disabled).toBe(true);
+    expect(sync.getAttribute("aria-busy")).toBe("true");
+    expect(host.querySelector<HTMLButtonElement>('button[aria-label="Eject USB B"]')?.disabled).toBe(true);
+    expect(box("Eject after syncing")?.disabled).toBe(true);
+    click(sync);
+    expect(syncDevices).toHaveBeenCalledTimes(1);
+    const pendingLabel = sync.textContent;
+    act(() => finish());
+    await settle();
+    await settle();
+    expect(sync.disabled).toBe(false);
+    expect(sync.hasAttribute("aria-busy")).toBe(false);
+    expect(status()).toBe("Sync complete.");
+    // Export is terminal: the remaining work must not still be called syncing.
+    expect(pendingLabel?.trim()).toBe("Refreshing…");
+  });
+
+  it.each(["discovery", "contents"] as const)("retains the completed report and releases controls when post-sync %s fails", async (stage) => {
+    click(box("Closing")); click(box("USB B")); await settle();
+    const backend = await getBackend();
+    syncDevices.mockImplementationOnce(() => {
+      if (stage === "discovery") listDevices.mockRejectedValueOnce(new Error("read failed"));
+      else vi.spyOn(backend, "deviceSyncState").mockRejectedValueOnce(new Error("read failed"));
+      return Promise.resolve([report("/Volumes/USB B", 10)]);
+    });
+    click(syncButton()); await settle(); await settle();
+    expect(status()).toBe("Sync complete.");
+    if (stage === "discovery") expect(host.textContent).toContain("Couldn’t read USB devices. Click Refresh to try again.");
+    expect(host.querySelector('[aria-label="USB B export report"]')?.textContent).toContain("10 tracks added");
+    expect(syncButton()?.disabled).toBe(false);
+    expect(syncButton()?.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("reports a rejected sync without entering post-result refresh", async () => {
+    click(box("Closing")); click(box("USB B")); await settle();
+    const calls = listDevices.mock.calls.length;
+    syncDevices.mockRejectedValueOnce(new Error("export refused"));
+    click(syncButton()); await settle(); await settle();
+    expect(status()).toBe("export refused");
+    expect(listDevices).toHaveBeenCalledTimes(calls + 1); // preflight discovery only
+    expect(host.querySelector('[aria-label="USB B export report"]')).toBeNull();
+    expect(syncButton()?.disabled).toBe(false);
+    expect(syncButton()?.hasAttribute("aria-busy")).toBe(false);
+  });
+});
