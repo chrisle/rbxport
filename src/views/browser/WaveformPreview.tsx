@@ -181,6 +181,7 @@ export const WaveformPreview = memo(function WaveformPreview({
   startupCache = false,
 }: WaveformPreviewProps) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const painted = useRef(false);
   // View › Color › Waveform color: the row follows the deck's palette, and a
   // bitmap rendered in one palette is not the row in another. View ›
   // Full/Preview Waveform switches the row between half and full, as it does
@@ -193,6 +194,12 @@ export const WaveformPreview = memo(function WaveformPreview({
     const dpr = window.devicePixelRatio || 1;
     const key = `${startupCache ? "startup" : "live"}:${palette}:${half ? "half" : "full"}:${WaveformCache.key(trackId, width, dpr)}`;
 
+    const clear = () => {
+      const canvas = ref.current;
+      if (!canvas || cancelled || !painted.current) return;
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      painted.current = false;
+    };
     const paint = (entry: { bitmap: CanvasImageSource }) => {
       const canvas = ref.current;
       if (!canvas || cancelled) return;
@@ -200,6 +207,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(entry.bitmap, 0, 0, canvas.width, canvas.height);
+      painted.current = true;
       // A cue without a colour of its own takes its slot's HOT CUE color
       // default, as rekordbox's row preview does.
       const badges = hotCues.map(([letter, at, colour, loop]) =>
@@ -221,13 +229,18 @@ export const WaveformPreview = memo(function WaveformPreview({
       // A row a flick goes past unmounts before making a request.
       timer = window.setTimeout(() => {
         void load(trackId, key, width, height, dpr, palette, half).then((rendered) => {
-          if (rendered && current === revision) paint(rendered);
+          if (current !== revision) return;
+          if (rendered) paint(rendered);
+          else clear();
         });
       }, SETTLE_MS);
     };
     const listeners = visibleRows.get(trackId) ?? new Set<() => void>();
     listeners.add(refresh);
     visibleRows.set(trackId, listeners);
+    // The canvas survives palette/track changes. Its previous pixels must
+    // not stand in for a different format while that request is unavailable.
+    clear();
     refresh();
 
     return () => {
