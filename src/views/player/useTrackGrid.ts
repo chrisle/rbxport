@@ -27,7 +27,8 @@ export interface TrackGrid {
   /**
    * The track `grid` was read for. After a switch the previous track's grid
    * stays until the new one arrives, so a reader that must not act on the
-   * wrong track's beats checks this first.
+   * wrong track's beats checks this first. If the same audio is loaded from
+   * a different device row, neither the previous grid nor its ID is exposed.
    */
   gridTrackId: string | null;
 }
@@ -96,5 +97,14 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
     };
   }, [track, sourceKey]);
 
-  return { grid, state: readSource === sourceKey ? state : null, setState, gridTrackId };
+  const currentSource = readSource === sourceKey;
+  // Two rows can load the same audio while referring to different grids.
+  // The old grid's track ID would be indistinguishable from the new one's.
+  const sameAudioOtherSource = !currentSource && gridTrackId === track?.id;
+  return {
+    grid: sameAudioOtherSource ? NO_BEATS : grid,
+    state: currentSource ? state : null,
+    setState,
+    gridTrackId: sameAudioOtherSource ? null : gridTrackId,
+  };
 }

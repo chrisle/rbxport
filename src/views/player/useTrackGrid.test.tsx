@@ -103,13 +103,27 @@ it("reads grid bytes and state from the loaded device row when audio is shared",
   expect(gridState).toHaveBeenLastCalledWith(row.id, other.deviceSource);
 });
 
-it("disables edits while the same audio switches to another device source", async () => {
+it("withholds the old grid while the same audio switches to another device source", async () => {
   const first = { ...track, id: "file:/Volumes/TEST/a.mp3", deviceSource: { path: "/Volumes/TEST", format: "deviceLibrary" as const, trackId: 1 } };
-  act(() => root.render(<Probe row={first} />)); await settle();
+  act(() => root.render(<Probe row={first} />));
+  await settle();
   expect(latest.state).not.toBeNull();
-  trackBeats.mockReturnValueOnce(new Promise(() => {}));
-  act(() => root.render(<Probe row={{ ...first, deviceSource: { ...first.deviceSource, format: "oneLibrary", trackId: 9 } }} />));
+  expect(latest.gridTrackId).toBe(first.id);
+  expect(Array.from(latest.grid.times)).toEqual([467]);
+
+  let resolveNext!: (value: Uint8Array) => void;
+  trackBeats.mockReturnValueOnce(new Promise((resolve) => { resolveNext = resolve; }));
+  const next = { ...first, deviceSource: { ...first.deviceSource, format: "oneLibrary" as const, trackId: 9 } };
+  act(() => root.render(<Probe row={next} />));
+  await settle();
   expect(latest.state).toBeNull();
+  expect(latest.gridTrackId).toBeNull();
+  expect(Array.from(latest.grid.times)).toEqual([]);
+
+  resolveNext(bytes(100, 17400));
+  await settle();
+  expect(latest.gridTrackId).toBe(next.id);
+  expect(Array.from(latest.grid.times)).toEqual([100]);
 });
 
 it("does not confuse pipe characters in device paths with source field boundaries", async () => {

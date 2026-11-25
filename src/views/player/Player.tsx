@@ -112,7 +112,7 @@ import { previousRestarts } from "@/lib/continuousPlay";
 import { useTrackDetails } from "./useTrackDetails";
 import { useTrackGrid } from "./useTrackGrid";
 import { useGridEditor } from "./useGridEditor";
-import { nudgeGrid } from "@/lib/gridEdit";
+import { gridSourceKey, nudgeGrid } from "@/lib/gridEdit";
 import { listenEditHistory } from "@/lib/editHistory";
 import { registerDeck } from "@/lib/scripting";
 import { useHoldRepeat } from "./useHoldRepeat";
@@ -922,10 +922,12 @@ export const Player = memo(function Player({
   // edit from any deck refetches both — see `useTrackGrid`.
   const { grid: savedGrid, state: gridState, setState: setGridState, gridTrackId } = useTrackGrid(track);
   // A grid shift plays before its save ends: the shifted grid stands in for
-  // the saved one until the save comes back. Kept with its track, so a
-  // track change drops it.
-  const [nudge, setNudge] = useState<{ track: string; grid: TrackBeatGrid } | null>(null);
-  const nudgePreview = nudge !== null && nudge.track === track?.id ? nudge.grid : null;
+  // the saved one until the save comes back. Keep it with the grid's source,
+  // since two device rows can load the same audio.
+  const gridSource = gridSourceKey(track?.id, track?.deviceSource);
+  const [nudge, setNudge] = useState<{ source: string; grid: TrackBeatGrid } | null>(null);
+  const nudgePreview = nudge?.source === gridSource ? nudge.grid : null;
+  useLayoutEffect(() => setNudge(null), [gridSource]);
   const grid = nudgePreview ?? savedGrid;
   // The tempo, from the grid where there is one: an edit that changes it
   // reaches here before the browser's row is re-read.
@@ -1544,10 +1546,10 @@ export const Player = memo(function Player({
   const onNudge = useCallback((ms: number) => {
     const id = track?.id;
     if (id === undefined) return;
-    setNudge(p => ({ track: id, grid: nudgeGrid(p?.track === id ? p.grid : savedGrid, ms, totalMs) }));
+    setNudge(p => ({ source: gridSource, grid: nudgeGrid(p?.source === gridSource ? p.grid : savedGrid, ms, totalMs) }));
     followShift(ms);
     onGridNudge?.(ms);
-  }, [track?.id, savedGrid, totalMs, followShift, onGridNudge]);
+  }, [track?.id, gridSource, savedGrid, totalMs, followShift, onGridNudge]);
   // A save that fails leaves the saved grid as it was, so the deck goes back to it.
   const onGridError = useCallback((message: string | null) => {
     if (message !== null) setNudge(null);
@@ -1847,7 +1849,7 @@ export const Player = memo(function Player({
     alignTimer.current = globalThis.setTimeout(alignToMaster, PHASE_SETTLE_MS);
   }, [loadReady, loadedId, playback.playing, alignToMaster]);
   // Another load, or the deck going away, drops one still waiting.
-  useEffect(() => () => globalThis.clearTimeout(alignTimer.current), [loadedId]);
+  useEffect(() => () => globalThis.clearTimeout(alignTimer.current), [loadedId, gridSource]);
 
   /*
    * The phase lock. A locked deck that plays is checked ten times a second,
