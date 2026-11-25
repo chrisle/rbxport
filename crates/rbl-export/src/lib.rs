@@ -143,7 +143,9 @@ pub struct SourceTrack {
     pub file_size: u64,
     /// Analysis to copy alongside, as (extension, bytes).
     pub analysis: Vec<(String, Vec<u8>)>,
-    /// Deferred companion location. Selection and estimates never open it.
+    /// Exact stored pathname of the primary DAT, including its spelling.
+    /// EXT/2EX sibling extensions are derived from it. Loading is deferred;
+    /// selection and estimates do not read the file contents.
     #[serde(default)]
     pub analysis_source: Option<PathBuf>,
     /// Reconciliation kept the device version because its source was unavailable.
@@ -1739,9 +1741,8 @@ fn export_cancellable_inner(
             }
         }
         let analysis_not_updated = track.analysis_source.as_ref().is_some_and(|base| previous.as_ref().and_then(|m| m.generation.as_ref()).is_some_and(|g| {
-            ["DAT", "EXT", "2EX"].iter().all(|ext| {
-                let path = base.with_extension(ext);
-                g.inputs.get(&path.to_string_lossy().into_owned()).is_some_and(|old| incremental::revision(&path).is_ok_and(|now| now == *old))
+            incremental::analysis_paths(base).iter().all(|(_, path)| {
+                g.inputs.get(&path.to_string_lossy().into_owned()).is_some_and(|old| incremental::revision(path).is_ok_and(|now| now == *old))
             })
         }));
         if content_changed && analysis_not_updated { analysis_reused = None; }

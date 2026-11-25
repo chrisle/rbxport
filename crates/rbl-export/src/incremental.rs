@@ -162,10 +162,16 @@ pub fn inputs(tracks: &[SourceTrack]) -> std::io::Result<BTreeMap<String, Option
     Ok(out)
 }
 
+/// The caller supplies the exact primary DAT. Only companion extensions
+/// are derived; loading and every source receipt must describe the same files.
+pub(crate) fn analysis_paths(base: &Path) -> [(&'static str, PathBuf); 3] {
+    [("DAT", base.to_owned()), ("EXT", base.with_extension("EXT")), ("2EX", base.with_extension("2EX"))]
+}
+
 fn input_paths(track: &SourceTrack) -> Vec<PathBuf> {
     let mut paths = vec![track.source_path.clone()];
     if let Some(base) = &track.analysis_source {
-        paths.extend(["DAT", "EXT", "2EX"].map(|e| base.with_extension(e)));
+        paths.extend(analysis_paths(base).map(|(_, path)| path));
     }
     if let Some(image) = &track.artwork {
         paths.push(image.clone());
@@ -261,18 +267,21 @@ pub fn analysis_recipe(track: &SourceTrack, audio: &str) -> Result<String> {
 
 pub fn analysis_recipe_with_revision(track: &SourceTrack, audio: &str, audio_revision: &Option<FileRevision>) -> Result<String> {
     let revisions = track.analysis_source.as_ref().map(|base| {
-        ["DAT", "EXT", "2EX"].map(|ext| Ok((ext, revision(&base.with_extension(ext))?))).into_iter()
+        analysis_paths(base).map(|(ext, path)| Ok((ext, revision(&path)?))).into_iter()
             .collect::<std::io::Result<Vec<_>>>()
     }).transpose()?;
     digest(&(audio, &track.cues, &track.analysis, &track.analysis_source, revisions, audio_revision, TRANSFORM_VERSION))
 }
 
 pub fn load_analysis(track: &SourceTrack) -> Result<Vec<(String, Vec<u8>)>> {
+    load_analysis_with(track, |path| std::fs::read(path))
+}
+
+fn load_analysis_with(track: &SourceTrack, mut read: impl FnMut(&Path) -> std::io::Result<Vec<u8>>) -> Result<Vec<(String, Vec<u8>)>> {
     let Some(base) = &track.analysis_source else { return Ok(track.analysis.clone()); };
     let mut files = Vec::new();
-    for ext in ["DAT", "EXT", "2EX"] {
-        let path = base.with_extension(ext);
-        match std::fs::read(&path) {
+    for (ext, path) in analysis_paths(base) {
+        match read(&path) {
             Ok(bytes) => {
                 read_bytes(&path, bytes.len() as u64);
                 rbl_anlz::parse(&bytes).map_err(|e| std::io::Error::other(format!("Invalid analysis {}: {e}", path.display())))?;
@@ -284,4 +293,67 @@ pub fn load_analysis(track: &SourceTrack) -> Result<Vec<(String, Vec<u8>)>> {
         }
     }
     Ok(files)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod primary_analysis_tests {
+    use super::*;
+
+    fn image() -> Vec<u8> {
+        rbl_anlz::AnlzBuilder::new().path("/generated.wav").waveform_preview(b"PWAV", &[9; 400]).finish()
+    }
+
+    #[test]
+    fn primary_reader_preserves_the_stored_dat_spelling() {
+        for ext in ["dat", "dAt"] {
+            let base = PathBuf::from(format!("/fixture/ANLZ0000.{ext}"));
+            let track = SourceTrack { analysis_source: Some(base.clone()), ..Default::default() };
+            let bytes = image();
+            let mut requested = Vec::new();
+            let loaded = load_analysis_with(&track, |path| {
+                requested.push(path.to_owned());
+                if path == base { Ok(bytes.clone()) }
+                else { Err(std::io::ErrorKind::NotFound.into()) }
+            }).unwrap();
+            assert_eq!(requested.first(), Some(&base), "the primary file is the exact supplied pathname");
+            assert_eq!(loaded, [("DAT".to_owned(), bytes)]);
+        }
+    }
+
+    #[test]
+    fn uppercase_primary_and_optional_companions_keep_their_existing_reads() {
+        let base = PathBuf::from("/fixture/ANLZ0000.DAT");
+        let track = SourceTrack { analysis_source: Some(base.clone()), ..Default::default() };
+        let bytes = image();
+        let mut requested = Vec::new();
+        let loaded = load_analysis_with(&track, |path| {
+            requested.push(path.to_owned()); Ok(bytes.clone())
+        }).unwrap();
+        assert_eq!(requested, [base.clone(), base.with_extension("EXT"), base.with_extension("2EX")]);
+        assert_eq!(loaded.len(), 3);
+    }
+
+    #[test]
+    fn a_missing_primary_does_not_substitute_a_differently_spelled_file() {
+        let base = PathBuf::from("/fixture/ANLZ0000.dat");
+        let other = base.with_extension("DAT");
+        let track = SourceTrack { analysis_source: Some(base), ..Default::default() };
+        let loaded = load_analysis_with(&track, |path| {
+            if path == other { Ok(image()) }
+            else { Err(std::io::ErrorKind::NotFound.into()) }
+        }).unwrap();
+        assert_eq!(loaded, []);
+    }
+
+    #[test]
+    fn source_receipts_name_the_supplied_primary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("ANLZ0000.dAt");
+        std::fs::write(&base, image()).unwrap();
+        let track = SourceTrack { analysis_source: Some(base.clone()), ..Default::default() };
+        let recorded = inputs(&[track]).unwrap();
+        assert!(recorded.get(&base.to_string_lossy().into_owned()).is_some_and(Option::is_some),
+            "source changes must be tracked under the supplied primary pathname");
+    }
 }

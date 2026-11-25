@@ -93,8 +93,8 @@ fn from_baseline_in(destination: &Path, before: &Snapshot, previous: Option<&Man
         });
         if !unchanged {
             if let Some(base) = &track.analysis_source {
-                for ext in ["DAT", "EXT", "2EX"] {
-                    if let Ok(m) = std::fs::metadata(base.with_extension(ext)) { asset_bytes += on_disk(m.len() + 256); new_files += 1; }
+                for (_, path) in incremental::analysis_paths(base) {
+                    if let Ok(m) = std::fs::metadata(path) { asset_bytes += on_disk(m.len() + 256); new_files += 1; }
                 }
             } else {
                 asset_bytes += track.analysis.iter().map(|(_, b)| on_disk(b.len() as u64 + 256)).sum::<u64>();
