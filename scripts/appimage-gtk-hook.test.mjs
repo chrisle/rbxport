@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { fileURLToPath } from "node:url";
+
 import { PLUGIN, hookHead, hookMatches, toolsDir } from "./appimage-gtk-hook.mjs";
 
 const plugin = readFileSync(PLUGIN, "utf8");
@@ -126,4 +128,49 @@ test("the bundler's tools directory follows dirs::cache_dir", () => {
   // A relative XDG_CACHE_HOME is ignored, as the dirs crate does.
   assert.equal(toolsDir({ HOME: "/home/runner", XDG_CACHE_HOME: "cache" }), "/home/runner/.cache/tauri");
   assert.throws(() => toolsDir({}));
+});
+
+
+test("verification prepares library parents before a SONAME-first extraction", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rbxport-337-extract-"));
+  try {
+    const hook = join(dir, "hook");
+    writeFileSync(hook, hookHead(plugin));
+    const image = join(dir, "fixture.AppImage");
+    // Narrow extraction adapter for fedfad5 runtime.c:789–903: symlink() does
+    // not create parents; the later regular-file branch does mkdir_p(parent).
+    // Use real filesystem calls and SONAME-first order, not a precreated tree.
+    writeFileSync(image, `#!/bin/sh
+set -eu
+[ "$1" = --appimage-extract ]
+case "$2" in
+apprun-hooks/linuxdeploy-plugin-gtk.sh)
+  mkdir -p squashfs-root/apprun-hooks
+  cp "$FIXTURE_HOOK" squashfs-root/apprun-hooks/linuxdeploy-plugin-gtk.sh;;
+'usr/lib/libpango*.so*')
+  ln -s libpango-1.0.so.0.5000.12 squashfs-root/usr/lib/libpango-1.0.so.0 2>/dev/null || true
+  mkdir -p squashfs-root/usr/lib
+  printf fixture > squashfs-root/usr/lib/libpango-1.0.so.0.5000.12;;
+'usr/lib/libharfbuzz*.so*')
+  ln -s libharfbuzz.so.0.60000.0 squashfs-root/usr/lib/libharfbuzz.so.0
+  printf fixture > squashfs-root/usr/lib/libharfbuzz.so.0.60000.0;;
+*) exit 3;;
+esac
+`, { mode: 0o755 });
+    // ELF contents are orthogonal here; focused ELF fixtures cover the gate.
+    const readelf = join(dir, "readelf");
+    writeFileSync(readelf, `#!/bin/sh
+case "$2" in
+--file-header) printf 'Class: ELF64\\nData: little endian\\nMachine: x86-64\\n';;
+--dynamic) echo '(SONAME) Library soname: [libharfbuzz.so.0]';;
+--dyn-syms)
+  case "$3" in *libharfbuzz*) ndx=12;; *) ndx=UND;; esac
+  echo "12: 0000000000000000 0 FUNC GLOBAL DEFAULT $ndx hb_shape";;
+esac
+`, { mode: 0o755 });
+    const output = execFileSync(process.execPath, [fileURLToPath(new URL("./appimage-gtk-hook.mjs", import.meta.url)), "verify", image], {
+      encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FIXTURE_HOOK: hook },
+    });
+    assert.match(output, /Pango\/HarfBuzz symbols verified/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

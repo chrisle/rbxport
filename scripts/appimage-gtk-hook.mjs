@@ -84,6 +84,8 @@ function verify(appimage) {
       throw new Error(`${appimage}: its GTK AppRun hook is not the one in packaging/appimage (#448)`);
     }
     // Extraction only: verification also runs after signing, so never rewrite the bundle.
+    // Type-2 extraction creates parents for regular files, but not for symlinks.
+    mkdirSync(join(work, "squashfs-root", "usr/lib"), { recursive: true });
     for (const pattern of ["usr/lib/libpango*.so*", "usr/lib/libharfbuzz*.so*"]) {
       execFileSync(resolve(appimage), ["--appimage-extract", pattern], { cwd: work, stdio: "ignore" });
     }
