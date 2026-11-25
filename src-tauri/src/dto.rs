@@ -524,7 +524,16 @@ pub struct SyncDeviceReportDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MissingExportFileDto {
+    pub id: String,
     pub title: String,
+    pub path: String,
+    pub playlists: Vec<MissingExportPlaylistDto>,
+}
+
+/// A containing playlist in this export selection, with its folder breadcrumb.
+#[derive(Debug, Clone, Serialize)]
+pub struct MissingExportPlaylistDto {
+    pub id: String,
     pub path: String,
 }
 

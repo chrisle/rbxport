@@ -19,7 +19,7 @@ use crate::dto::{
     EditHistoryDto, FolderPlaylistDto, ImportReportDto, LibrarySummaryDto, LimiterDto, PhraseDto, RowDto, UnanalysedTrackDto, UnanalysedTracksDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
-    ExportProgressDto, FilterValuesDto, ItunesLibraryDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
+    ExportProgressDto, FilterValuesDto, ItunesLibraryDto, MissingExportFileDto, MissingExportPlaylistDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
     XmlImportReportDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -1460,22 +1460,54 @@ pub async fn validate_export_files(
     blocking("validate_export_files", move || {
         let selection =
             ExportSelection::from_playlists(&state, &library, &share, &playlists, false)?;
-        Ok(selection.tracks.into_iter().filter_map(|track| {
-            if track.source_path.is_file() {
-                return None;
-            }
-            Some(MissingExportFileDto {
-                title: if track.title.is_empty() {
-                    "Untitled track".to_owned()
-                } else {
-                    track.title
-                },
-                path: track.source_path.to_string_lossy().into_owned(),
-            })
-        })
-        .collect())
+        Ok(missing_export_files(&selection, std::path::Path::is_file))
     })
     .await
+}
+
+/// Uses only the already materialized selection: no library query, rule
+/// evaluation or filesystem walk is needed to attribute its missing tracks.
+fn missing_export_files(
+    selection: &ExportSelection,
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> Vec<MissingExportFileDto> {
+    let mut files = Vec::new();
+    let positions: Vec<_> = selection.tracks.iter().map(|track| {
+        if exists(&track.source_path) { return None; }
+        let at = files.len();
+        files.push(MissingExportFileDto {
+            id: track.id.to_string(),
+            title: if track.title.is_empty() { "Untitled track".to_owned() } else { track.title.clone() },
+            path: track.source_path.to_string_lossy().into_owned(),
+            playlists: Vec::new(),
+        });
+        Some(at)
+    }).collect();
+    if files.is_empty() { return files; }
+    let by_id: std::collections::HashMap<_, _> = selection.playlists.iter().map(|playlist| (playlist.id, playlist)).collect();
+    for playlist in selection.playlists.iter().filter(|playlist| !playlist.folder) {
+        // Repeated entries of one track are one containing playlist, while
+        // another selected playlist containing that track is still listed.
+        let mut seen = std::collections::HashSet::new();
+        let missing: Vec<_> = playlist.track_indices.iter()
+            .filter_map(|&index| positions.get(index).copied().flatten())
+            .filter(|&index| seen.insert(index)).collect();
+        if missing.is_empty() { continue; }
+        let mut parts = vec![playlist.name.as_str()];
+        let mut parent = playlist.parent_id;
+        let mut visited = std::collections::HashSet::from([playlist.id]);
+        while parent != 0 && visited.insert(parent) {
+            let Some(folder) = by_id.get(&parent).filter(|folder| folder.folder) else { break; };
+            parts.push(folder.name.as_str());
+            parent = folder.parent_id;
+        }
+        parts.reverse();
+        let path = parts.join(" / ");
+        for at in missing {
+            files[at].playlists.push(MissingExportPlaylistDto { id: playlist.id.to_string(), path: path.clone() });
+        }
+    }
+    files
 }
 
 #[allow(clippy::too_many_arguments, reason = "one independent USB sync worker")]
@@ -5101,6 +5133,53 @@ pub async fn filter_values(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{device_dtos, expand_import_paths, read_analysis};
+
+
+    #[test]
+    fn missing_export_context_checks_each_selected_track_once_without_library_access() {
+        use rbl_export::{SourcePlaylist, SourceTrack};
+        let checked = std::cell::Cell::new(0);
+        let selection = super::ExportSelection {
+            tracks: vec![
+                SourceTrack { id: 1, title: "Play".into(), source_path: "same.wav".into(), ..Default::default() },
+                SourceTrack { id: 2, title: "Play".into(), source_path: "same.wav".into(), ..Default::default() },
+                SourceTrack { id: 3, title: String::new(), source_path: "present.wav".into(), ..Default::default() },
+            ],
+            playlists: vec![
+                SourcePlaylist { id: 7, name: "Folder".into(), folder: true, track_indices: vec![0], ..Default::default() },
+                SourcePlaylist { id: 8, name: "Play".into(), parent_id: 7, track_indices: vec![0, 0, 2, usize::MAX], ..Default::default() },
+                SourcePlaylist { id: 9, name: "Play".into(), track_indices: vec![0, 1], ..Default::default() },
+            ],
+            my_tags: Vec::new(), sync: rbl_export::SyncSource::default(), keep_unlisted: false,
+        };
+        let files = super::missing_export_files(&selection, |path| {
+            checked.set(checked.get() + 1);
+            path == std::path::Path::new("present.wav")
+        });
+        assert_eq!(checked.get(), 3, "one existence check per unique export track, not playlist occurrence");
+        assert_eq!(files.len(), 2, "identity is not inferred from shared title or audio path");
+        assert_eq!((files[0].id.as_str(), files[1].id.as_str()), ("1", "2"));
+        assert_eq!(files[0].playlists.iter().map(|p| (p.id.as_str(), p.path.as_str())).collect::<Vec<_>>(),
+            [("8", "Folder / Play"), ("9", "Play")]);
+        assert_eq!(files[1].playlists.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["9"]);
+    }
+
+    #[test]
+    fn missing_export_context_bounds_malformed_folder_ancestry() {
+        use rbl_export::{SourcePlaylist, SourceTrack};
+        let selection = super::ExportSelection {
+            tracks: vec![SourceTrack { id: 1, ..Default::default() }],
+            playlists: vec![
+                SourcePlaylist { id: 7, parent_id: 7, name: "Cycle".into(), folder: true, ..Default::default() },
+                SourcePlaylist { id: 8, parent_id: 7, name: "Play".into(), track_indices: vec![0], ..Default::default() },
+                SourcePlaylist { id: 9, parent_id: 99, name: "Other".into(), track_indices: vec![0], ..Default::default() },
+            ],
+            my_tags: Vec::new(), sync: rbl_export::SyncSource::default(), keep_unlisted: false,
+        };
+        let files = super::missing_export_files(&selection, |_| false);
+        assert_eq!(files[0].title, "Untitled track");
+        assert_eq!(files[0].playlists.iter().map(|p| p.path.as_str()).collect::<Vec<_>>(), ["Cycle / Play", "Other"]);
+    }
 
     fn volume(name: &str) -> rbl_devices::Device {
         rbl_devices::Device {

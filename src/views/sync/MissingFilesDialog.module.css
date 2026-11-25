@@ -35,8 +35,8 @@
   overflow-y: auto;
   border: 1px solid var(--c-text-dim);
 }
-.list li { display: flex; flex-direction: column; padding: 6px 10px; line-height: 1.4; }
-.list li + li { border-top: 1px solid var(--c-text-dim); }
+.list > li { display: flex; flex-direction: column; padding: 6px 10px; line-height: 1.4; }
+.list > li + li { border-top: 1px solid var(--c-text-dim); }
 .path { color: var(--c-text-dim); overflow-wrap: anywhere; }
 .buttons { display: flex; justify-content: center; gap: 48px; margin-top: 22px; }
 .buttons button {
@@ -55,3 +55,5 @@
 @media (max-width: 480px) {
   .buttons { gap: 24px; }
 }
+
+.list ul { margin: 4px 0 0; padding-left: 18px; }

@@ -34,9 +34,12 @@ export function MissingFilesDialog({ files, onChoose }: {
         {" "}{t("Usable copies already on each USB will be kept. Tracks without a usable copy will be skipped.")}
       </p>
       <ul className={styles.list} aria-label={t("Missing audio files")}>
-        {files.map((file, index) => <li key={`${index}:${file.path}`}>
-          <strong>{file.title}</strong>
-          <span className={styles.path}>{file.path}</span>
+        {files.map(file => <li key={file.id} data-track-id={file.id}>
+          <strong data-i18n-ignore>{file.title}</strong>
+          <span className={styles.path} data-i18n-ignore>{file.path}</span>
+          <ul aria-label={t("Playlists")}>
+            {file.playlists.map(playlist => <li key={playlist.id} data-playlist-id={playlist.id} data-i18n-ignore>{playlist.path}</li>)}
+          </ul>
         </li>)}
       </ul>
       <div className={styles.buttons}>
