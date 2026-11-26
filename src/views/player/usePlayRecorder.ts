@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { getBackend } from "@/ipc/client";
+import { isLooseId } from "@/lib/explorer";
 
 /** What decides whether, and when, the deck records a play. */
 export interface PlayRecorderInput {
@@ -30,7 +31,8 @@ export function usePlayRecorder({ trackId, playing, enabled, seconds, onError }:
     recordedFor.current = null;
   }, [trackId]);
   useEffect(() => {
-    if (!playing || trackId === null || !enabled) return undefined;
+    // Device and loose files can play, but have no collection history row.
+    if (!playing || trackId === null || isLooseId(trackId) || !enabled) return undefined;
     const id = trackId;
     const timer = globalThis.setInterval(() => {
       playedSeconds.current += 1;

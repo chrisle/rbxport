@@ -7,6 +7,7 @@ const recordPlay = vi.fn((_id: string) => Promise.resolve(1));
 vi.mock("@/ipc/client", () => ({ getBackend: () => Promise.resolve({ edits: { recordPlay } }) }));
 
 import { usePlayRecorder, type PlayRecorderInput } from "./usePlayRecorder";
+import { IpcError } from "@/ipc/invoke";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -42,7 +43,7 @@ async function play(seconds: number) {
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   vi.useFakeTimers();
-  recordPlay.mockClear();
+  recordPlay.mockReset().mockResolvedValue(1);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -93,4 +94,42 @@ describe("usePlayRecorder (#540)", () => {
     await play(10);
     expect(recordPlay).not.toHaveBeenCalled();
   });
+
+  it("does not attempt collection history for a loaded external track at the normal threshold", async () => {
+    const id = "file:/run/media/generated/USB/Contents/Generated/track.mp3";
+    const onError = vi.fn();
+    recordPlay.mockRejectedValueOnce(new IpcError({ kind: "readOnly", message: `no track ${id}` }));
+    render(deck({ trackId: id, seconds: 60, onError }));
+    await play(59);
+    expect(recordPlay).not.toHaveBeenCalled();
+    await play(1);
+    expect.soft(recordPlay).not.toHaveBeenCalled();
+    expect.soft(onError).not.toHaveBeenCalled();
+  });
+
+  it("still records a numeric collection track once at the same sixty-second threshold", async () => {
+    const onError = vi.fn();
+    render(deck({ trackId: "100000", seconds: 60, onError }));
+    await play(59);
+    expect(recordPlay).not.toHaveBeenCalled();
+    await play(1);
+    expect(recordPlay).toHaveBeenCalledExactlyOnceWith("100000");
+    expect(onError).not.toHaveBeenCalled();
+    await play(60);
+    expect(recordPlay).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("still reports a genuine collection history refusal once", async () => {
+    const onError = vi.fn();
+    recordPlay.mockRejectedValueOnce(new IpcError({ kind: "readOnly", message: "The library is read-only." }));
+    render(deck({ trackId: "100000", seconds: 60, onError }));
+    await play(60);
+    expect(recordPlay).toHaveBeenCalledExactlyOnceWith("100000");
+    expect(onError).toHaveBeenCalledExactlyOnceWith("The library is read-only.");
+    await play(60);
+    expect(recordPlay).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
 });
