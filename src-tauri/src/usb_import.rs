@@ -302,8 +302,9 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
                     crate::device_library::BrowserExt::Present(_) => { report.skipped += 1; continue; },
                     crate::device_library::BrowserExt::Refused => return Err(err(format!("USB EXT for track {id}: companion is unavailable or ambiguous"))),
                 }
-                if strict_import_grid(&source_dat)?.is_none() { report.skipped += 1; continue; }
             }
+            let source_grid = strict_import_grid(&source_dat)?;
+            if grid_only && source_grid.is_none() { report.skipped += 1; continue; }
             let entries = if grid_only { None } else { Some(source_cues.strict_cue_entries().map_err(|e| {
                 let extension = if has_source_ext { "EXT" } else { "DAT" };
                 err(format!("USB {extension} for track {id}: {e}"))
@@ -329,29 +330,46 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
             // nothing, and the next sync would copy it all back (#134).
             let mut differs = false;
             let mut grid_changed = false;
+            let mut grid_order_changed = false;
+            let mut cues_changed = false;
             for extension in ["DAT", "EXT"] {
                 let target = target.with_extension(extension);
                 if !target.exists() { continue; }
                 let (mut dest, identity) = read_import_anlz_identified(&target, "local library", extension, id)?;
                 let src = if extension == "DAT" { &source_dat } else { &source_cues };
                 if !grid_only {
-                    differs |= !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
-                    dest.sections.retain(|s| !s.is_cue_list());
-                    dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
+                    let changed = !dest.sections.iter().filter(|s| s.is_cue_list()).eq(src.sections.iter().filter(|s| s.is_cue_list()));
+                    cues_changed |= changed;
+                    differs |= changed;
+                    if changed {
+                        dest.sections.retain(|s| !s.is_cue_list());
+                        dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
+                    }
                 }
                 if extension == "DAT" && !beats.is_empty() {
                     grid_changed = !dest.sections.iter().filter(|s| s.as_beat_grid().is_some()).eq(source_dat.section(b"PQTZ"));
                     differs |= grid_changed;
                 }
                 if extension == "DAT" && !beats.is_empty() {
-                    dest.sections.retain(|s| s.as_beat_grid().is_none());
-                    if let Some(grid) = source_dat.section(b"PQTZ") { dest.sections.push(grid.clone()); }
+                    let previous_slot = dest.sections.iter().position(|section| section.tag.0 == *b"PQTZ");
+                    dest.sections.retain(|s| s.tag.0 != *b"PQTZ");
+                    if let Some(grid) = source_grid {
+                        // Stock DAT readers consume PQTZ before waveform and
+                        // cue sections. Keep its raw bytes, including when
+                        // repairing files reordered by an earlier import.
+                        let slot = dest.sections.iter().take_while(|section| matches!(&section.tag.0, b"PPTH" | b"PVBR")).count();
+                        grid_order_changed = !grid_changed && previous_slot != Some(slot);
+                        dest.sections.insert(slot, grid.clone());
+                    }
+                    differs |= grid_order_changed;
                 }
                 let bytes = if extension == "EXT" && grid_only {
                     if !grid_changed { continue; }
                     let Some(cleared) = dest.with_extended_grid_cleared() else { continue; };
                     cleared
-                } else if extension == "EXT" { dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes()) } else { dest.to_bytes() };
+                } else if extension == "EXT" && !(grid_order_changed && !cues_changed && !bpm_changed) {
+                    dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes())
+                } else { dest.to_bytes() };
                 identities.push(identity);
                 files.push((target, bytes));
             }
@@ -378,15 +396,20 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
                 }
             }
             let identities = identities.unwrap_or_default();
-            if !differs && !bpm_changed && match &entries { Some(entries) => database_cues_match(state, id, entries)?, None => true } {
+            let cues_match = match &entries { Some(entries) => database_cues_match(state, id, entries)?, None => true };
+            if !differs && !bpm_changed && cues_match {
                 if grid_only { grid_noops.push(identities); }
                 report.unchanged += 1; continue;
             }
             // Keep only paths across tracks. The private temporary directory
             // holds validated output and cue input until every track passes.
             let slot = prepared.len();
+            // A physical order repair does not replace accepted cue rows.
+            let order_only = grid_order_changed && !grid_changed && !cues_changed && !bpm_changed && cues_match;
             let payload = if grid_only {
                 ImportPayload::Grid { expected_bpm: previous_bpm, analysis_path: relative }
+            } else if order_only {
+                ImportPayload::Order { expected_bpm: previous_bpm, analysis_path: relative }
             } else {
                 let cue_path = staging.path().join(format!("{slot}.cues"));
                 let cue_bytes = source_cues.to_bytes();
@@ -401,7 +424,7 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
                 std::fs::write(&staged, bytes).map_err(err)?;
                 staged_files.push((target, staged));
             }
-            prepared.push((id.clone(), payload, if grid_only && bpm == 0 { previous_bpm } else { bpm }, staged_files, identities));
+            prepared.push((id.clone(), payload, if (grid_only || order_only) && bpm == 0 { previous_bpm } else { bpm }, staged_files, identities));
         }
         // A complete cue import keeps its established authority. Never let
         // a grid-only image built from the old shared DAT undo its cue edit.
@@ -432,6 +455,7 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
                 ImportPayload::Cues(cue_path) => ImportPayload::Cues(read_import_anlz(&cue_path, "staged USB", "cue data", &id)?
                     .strict_cue_entries().map_err(|e| err(format!("staged USB cue data for track {id}: {e}")))?),
                 ImportPayload::Grid { expected_bpm, analysis_path } => ImportPayload::Grid { expected_bpm, analysis_path },
+                ImportPayload::Order { expected_bpm, analysis_path } => ImportPayload::Order { expected_bpm, analysis_path },
             };
             let files = staged_files.into_iter().map(|(target, staged)| {
                 std::fs::read(staged).map(|bytes| (target, bytes)).map_err(err)
@@ -510,6 +534,9 @@ const CUE_BATCH_BYTES: usize = 32 << 20;
 enum ImportPayload<C> {
     Cues(C),
     Grid { expected_bpm: u32, analysis_path: String },
+    // A full-cue source with matching accepted cues; keep full-source priority
+    // while journaling only its physical DAT repair and analysis revision.
+    Order { expected_bpm: u32, analysis_path: String },
 }
 
 struct PendingCues {
@@ -523,7 +550,7 @@ struct PendingCues {
 fn pending_overlaps(pending: &[PendingCues], incoming: &PendingCues) -> bool {
     pending.iter().any(|previous| {
         previous.files.iter().any(|(path, _)| incoming.files.iter().any(|(other, _)| other == path)) ||
-        ((matches!(previous.payload, ImportPayload::Grid { .. }) || matches!(incoming.payload, ImportPayload::Grid { .. })) &&
+        ((!matches!(previous.payload, ImportPayload::Cues(_)) || !matches!(incoming.payload, ImportPayload::Cues(_))) &&
             previous.identities.iter().any(|key| incoming.identities.contains(key)))
     })
 }
@@ -548,7 +575,7 @@ fn apply_cue_batch(
     for item in &batch {
         let prepared = state.read_db(|db| Ok(match &item.payload {
             ImportPayload::Cues(_) => crate::file_journal::FileJournal::prepare_cue_import_with(db, state.backup_dir(), location, &item.id, item.bpm, &item.files),
-            ImportPayload::Grid { analysis_path, .. } => crate::file_journal::FileJournal::prepare_grid_with(db, state.backup_dir(), location, &item.id, item.bpm, analysis_path, &item.files),
+            ImportPayload::Grid { analysis_path, .. } | ImportPayload::Order { analysis_path, .. } => crate::file_journal::FileJournal::prepare_grid_with(db, state.backup_dir(), location, &item.id, item.bpm, analysis_path, &item.files),
         }))
             .map_err(write_error)
             .and_then(|prepared| prepared);
@@ -564,7 +591,7 @@ fn apply_cue_batch(
         for item in &batch {
             match &item.payload {
                 ImportPayload::Cues(entries) => w.import_usb_cues(&item.id, entries, item.bpm)?,
-                ImportPayload::Grid { expected_bpm, analysis_path } => w.save_grid_revision_if_current(&item.id, item.bpm, *expected_bpm, analysis_path)?,
+                ImportPayload::Grid { expected_bpm, analysis_path } | ImportPayload::Order { expected_bpm, analysis_path } => w.save_grid_revision_if_current(&item.id, item.bpm, *expected_bpm, analysis_path)?,
             }
         }
         Ok(())
@@ -2026,6 +2053,193 @@ mod tests {
         legacy_dat_grid_only_case(0);
     }
 
+    #[allow(clippy::too_many_lines, reason = "one generated import checks framing, ordered publication, repair and repeat on the same library")]
+    fn modern_import_grid_framing_case(incomplete: bool, raw_tempo: u16) {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location, usb, _) = library_and_stick(dir.path());
+        let id = rbl_db::fixture::track_id(0);
+        let target = local_analysis_for(&state, &location, 1).remove(0);
+        let relative = state.write(|writer| writer.analysis_data_path_for(&id)).unwrap();
+        state
+            .write(|writer| {
+                writer.register_analysis(
+                    &id,
+                    &rbl_db::write::AnalysisRegistration {
+                        bpm_x100: 10830,
+                        key: None,
+                        analysis_data_path: &relative,
+                    },
+                )?;
+                writer.add_cue(&id, 0, 3000).map(|_| ())
+            })
+            .unwrap();
+        let beats: Vec<_> = (0..4)
+            .map(|index| rbl_anlz::Beat {
+                beat_number: index + 1,
+                tempo_x100: 10830,
+                time_ms: u32::from(index) * 554,
+            })
+            .collect();
+        let local_cues = [stick_cue(0, 3000, None, 1, "local memory")];
+        let mut dat = rbl_anlz::AnlzBuilder::new();
+        dat.path("/original.mp3")
+            .copy_section(&rbl_anlz::write::vbr_table_zero_section())
+            .beat_grid(&beats)
+            .waveform_preview(b"PWAV", &[1, 2, 3, 4])
+            .waveform_preview(b"PWV2", &[9, 10]);
+        for section in rbl_anlz::cues::sections(&local_cues, false) {
+            dat.copy_section(&section);
+        }
+        std::fs::write(&target, dat.finish()).unwrap();
+        let mut ext = rbl_anlz::AnlzBuilder::new();
+        ext.path("/original.mp3").waveform_scroll(b"PWV3", 1, &[5, 6, 7, 8]);
+        for section in rbl_anlz::cues::sections(&local_cues, true) {
+            ext.copy_section(&section);
+        }
+        std::fs::write(target.with_extension("EXT"), ext.finish()).unwrap();
+        let before_dat = std::fs::read(&target).unwrap();
+        let before_ext = std::fs::read(target.with_extension("EXT")).unwrap();
+        let before_cues = state.write(|writer| writer.cue_rows(&id)).unwrap();
+        let source = usb.join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT");
+        let mut source_dat = rbl_anlz::Anlz::read(&source).unwrap();
+        let grid = source_dat
+            .sections
+            .iter_mut()
+            .find(|section| section.tag.0 == *b"PQTZ")
+            .unwrap();
+        grid.payload[2..4].copy_from_slice(&raw_tempo.to_be_bytes());
+        if incomplete {
+            grid.header[8..12].copy_from_slice(&2_u32.to_be_bytes());
+        }
+        std::fs::write(&source, source_dat.to_bytes()).unwrap();
+        let source_bytes = std::fs::read(&source).unwrap();
+        let source_ext = std::fs::read(source.with_extension("EXT")).unwrap();
+        assert!(
+            rbl_anlz::parse(&source_ext).unwrap().section(b"PCO2").is_some(),
+            "exercise complete modern cue import, not DAT-only fallback"
+        );
+        assert_eq!(
+            source_dat.beat_grid().unwrap().len(),
+            1,
+            "the tolerant reader still decodes one positive-tempo beat"
+        );
+        assert_eq!(strict_import_grid(&source_dat).is_err(), incomplete);
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let result = import(&state, &editor, &usb, true, false, false, false);
+        let after_dat = rbl_anlz::Anlz::read(&target).unwrap();
+        let after_ext = rbl_anlz::Anlz::read(&target.with_extension("EXT")).unwrap();
+        let bpm = state
+            .read_db(|db| {
+                Ok(db
+                    .connection()
+                    .query_row("SELECT BPM FROM djmdContent WHERE ID=?1", [&id], |row| {
+                        row.get::<_, u32>(0)
+                    })?)
+            })
+            .unwrap();
+        assert_eq!(bpm, 10830, "the positive collection BPM is independent of file framing");
+        assert_eq!(
+            after_dat.section(b"PWAV"),
+            rbl_anlz::parse(&before_dat).unwrap().section(b"PWAV")
+        );
+        assert_eq!(
+            after_ext.section(b"PWV3"),
+            rbl_anlz::parse(&before_ext).unwrap().section(b"PWV3")
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        assert_eq!(std::fs::read(source.with_extension("EXT")).unwrap(), source_ext);
+        let tags = |file: &rbl_anlz::Anlz| {
+            file.sections
+                .iter()
+                .map(|section| String::from_utf8_lossy(&section.tag.0).into_owned())
+                .collect::<Vec<_>>()
+        };
+        if incomplete {
+            assert!(
+                result.is_err(),
+                "a structurally incomplete modern USB grid must refuse before replacing a valid local grid"
+            );
+            assert_eq!(std::fs::read(&target).unwrap(), before_dat);
+            assert_eq!(std::fs::read(target.with_extension("EXT")).unwrap(), before_ext);
+            assert_eq!(state.write(|writer| writer.cue_rows(&id)).unwrap(), before_cues);
+        } else {
+            assert_eq!(result.unwrap().tracks, 1);
+            assert_eq!(
+                tags(&after_dat),
+                tags(&rbl_anlz::parse(&before_dat).unwrap()),
+                "normal cue import must retain canonical DAT section order"
+            );
+            assert_eq!(after_dat.section(b"PQTZ"), source_dat.section(b"PQTZ"));
+            assert_ne!(state.write(|writer| writer.cue_rows(&id)).unwrap(), [] as [rbl_db::write::CueRow; 0]);
+            // Simulate a file emitted by the previous importer: only PQTZ is
+            // out of place; all current source cues/grid already match.
+            let mut reordered = after_dat.clone();
+            let slot = reordered
+                .sections
+                .iter()
+                .position(|section| section.tag.0 == *b"PQTZ")
+                .unwrap();
+            let grid = reordered.sections.remove(slot);
+            reordered.sections.push(grid);
+            std::fs::write(&target, reordered.to_bytes()).unwrap();
+            let mut timing = rbl_anlz::write::extended_grid_empty_section();
+            timing.header[12..16].copy_from_slice(&((1_u32 << 16) | 0x2a4e).to_be_bytes());
+            timing.header[16..20].copy_from_slice(&250_u32.to_be_bytes());
+            timing.header[20..24].copy_from_slice(&((1_u32 << 16) | 0x2a4e).to_be_bytes());
+            timing.header[24..28].copy_from_slice(&250_u32.to_be_bytes());
+            timing.header[28..32].copy_from_slice(&1_u32.to_be_bytes());
+            timing.header[32..36].copy_from_slice(&13051_u32.to_be_bytes());
+            timing.payload = vec![0x12, 0x34];
+            let mut preserved_ext = after_ext;
+            preserved_ext.sections.push(timing);
+            let preserved_ext = preserved_ext.to_bytes();
+            std::fs::write(target.with_extension("EXT"), &preserved_ext).unwrap();
+            let rows = state.write(|writer| writer.cue_rows(&id)).unwrap();
+            assert_eq!(
+                import(&state, &editor, &usb, true, false, false, false).unwrap().tracks,
+                1,
+                "an otherwise identical reimport repairs the prior DAT order"
+            );
+            assert_eq!(std::fs::read(&target).unwrap(), after_dat.to_bytes());
+            assert_eq!(
+                std::fs::read(target.with_extension("EXT")).unwrap(),
+                preserved_ext,
+                "physical DAT order repair must retain existing extended timing"
+            );
+            assert_eq!(state.write(|writer| writer.cue_rows(&id)).unwrap(), rows);
+            assert_eq!(
+                state
+                    .read_db(|db| Ok(db.connection().query_row(
+                        "SELECT BPM FROM djmdContent WHERE ID=?1",
+                        [&id],
+                        |row| row.get::<_, u32>(0),
+                    )?))
+                    .unwrap(),
+                10830
+            );
+            let repeated = import(&state, &editor, &usb, true, false, false, false).unwrap();
+            assert_eq!((repeated.tracks, repeated.unchanged), (0, 1));
+            assert_eq!(std::fs::read(&target).unwrap(), after_dat.to_bytes());
+            assert_eq!(std::fs::read(target.with_extension("EXT")).unwrap(), preserved_ext);
+            assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+            assert_eq!(std::fs::read(source.with_extension("EXT")).unwrap(), source_ext);
+        }
+    }
+
+    #[test]
+    fn modern_import_grid_framing_rejects_incomplete_source_before_writes() {
+        modern_import_grid_framing_case(true, 10830);
+    }
+
+    #[test]
+    fn modern_import_grid_framing_complete_source_still_imports() {
+        modern_import_grid_framing_case(false, 10830);
+    }
+
+    #[test]
+    fn modern_import_grid_framing_zero_tempo_order_repair_keeps_collection_bpm() {
+        modern_import_grid_framing_case(false, 0);
+    }
     fn legacy_grid_control_fixture(dir: &Path) -> (AppState, rbl_db::LibraryLocation, PathBuf, PathBuf, PathBuf) {
         let (state, location, usb, _) = library_and_stick(dir);
         let local = local_analysis_for(&state, &location, 1).remove(0);
