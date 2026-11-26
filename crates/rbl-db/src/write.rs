@@ -1916,14 +1916,13 @@ impl Writer {
 
         let paths: Vec<PathBuf> = files.iter().map(|p| normalized(p)).collect();
         let tags = read_tags_parallel(&paths);
+        let stored_paths = import_paths(&self.library, &paths);
         self.prepare()?;
         let id = self.unused_id("djmdPlaylist")?;
         let uuid = self.rng.uuid4();
         let stamp = time::now();
-        let mut rows: Vec<(String, String)> = Vec::with_capacity(paths.len());
-        for _ in &paths {
-            rows.push((self.rng.uuid4(), self.rng.uuid4()));
-        }
+        let rows: Vec<(String, String)> = paths.iter()
+            .map(|_| (self.rng.uuid4(), self.rng.uuid4())).collect();
 
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1967,7 +1966,7 @@ impl Writer {
 
         // `insert_files` counts its own USNs up from one `next_usn` read; the
         // playlist rows below start past them.
-        let (imported, _) = insert_files(&tx, &mut self.rng, &paths, tags, &stamp)?;
+        let (imported, _) = insert_files(&tx, &mut self.rng, &paths, &stored_paths, tags, &stamp)?;
         let mut members = Vec::with_capacity(paths.len());
         for (file, imported) in paths.iter().zip(imported) {
             match imported {
@@ -2411,6 +2410,7 @@ impl Writer {
             })
             .collect();
         let tags = read_tags_parallel(&files);
+        let stored_paths = import_paths(&self.library, &files);
         self.prepare()?;
         let id = self.unused_id("djmdPlaylist")?;
         let uuid = self.rng.uuid4();
@@ -2422,7 +2422,7 @@ impl Writer {
 
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (outcomes, _) = insert_files(&tx, &mut self.rng, &files, tags, &stamp)?;
+        let (outcomes, _) = insert_files(&tx, &mut self.rng, &files, &stored_paths, tags, &stamp)?;
         let mut added: Vec<(String, PathBuf)> = Vec::new();
         let mut made = outcomes.into_iter().zip(&files);
         let mut contents: Vec<String> = Vec::with_capacity(entries.len());
@@ -2969,19 +2969,13 @@ impl Writer {
     /// the library (a drop onto a playlist) use the existing row rather than
     /// treat the file as unimportable. The path is cleaned the same way
     /// [`Self::import_file`] cleans it, so the two agree on what "already
-    /// there" means.
+    /// there" means. Portable stored paths and the exact previous native
+    /// spelling are checked without rewriting existing rows. Different IDs
+    /// occupying those aliases refuse the lookup rather than choose a track.
     pub fn track_id_at(&self, path: &Path) -> Result<Option<String>> {
         let path = normalized(path);
-        let folder = path.to_string_lossy().into_owned();
-        let id = self
-            .library
-            .connection()
-            .query_row(
-                "SELECT ID FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0 ORDER BY ID LIMIT 1",
-                params![folder],
-                |r| r.get::<_, String>(0),
-            )
-            .optional()?;
+        let stored = ImportPath::new(&path, self.library.drive_mapping().as_ref())?;
+        let id = stored.existing_id(self.library.connection())?;
         Ok(id)
     }
 
@@ -3010,7 +3004,8 @@ impl Writer {
         let uuid = self.rng.uuid4();
         let stamp = time::now();
         let today = stamp.get(..10).unwrap_or_default().to_owned();
-        let folder = path.to_string_lossy().into_owned();
+        let stored = ImportPath::new(path, self.library.drive_mapping().as_ref())?;
+        let folder = &stored.folder;
         // The library's own device: `djmdProperty` names it, and every one of
         // the 645 rows rekordbox 7 imported on this machine carries the pair.
         let (master_db, device): (Option<String>, Option<String>) = self
@@ -3028,12 +3023,7 @@ impl Writer {
 
         // Already in the library: importing again would give one file two
         // rows, and every playlist pointing at the wrong one.
-        let existing: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0",
-            params![folder],
-            |r| r.get(0),
-        )?;
-        if existing > 0 {
+        if stored.existing_id(&tx)?.is_some() {
             return Err(DbError::WriteRefused(format!(
                 "{} is already in the library",
                 path.display()
@@ -3051,7 +3041,7 @@ impl Writer {
         insert_content(
             &tx,
             &NewContent {
-                id: &id, uuid: &uuid, folder: &folder, file_name: &file_name, path, tags: &tags,
+                id: &id, uuid: &uuid, folder, file_name: &file_name, path, tags: &tags,
                 artist: &artist, album: &album, genre: &genre, label: &label, key: &key, credits: &credits,
                 today: &today, stamp: &stamp, master_db: &master_db, device: &device, usn,
             },
@@ -3076,12 +3066,13 @@ impl Writer {
     pub fn import_files(&mut self, paths: &[PathBuf]) -> Result<Vec<ImportOutcome>> {
         let paths: Vec<PathBuf> = paths.iter().map(|p| normalized(p)).collect();
         let tags = read_tags_parallel(&paths);
+        let stored_paths = import_paths(&self.library, &paths);
         self.prepare()?;
         let stamp = time::now();
 
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (outcomes, last_usn) = insert_files(&tx, &mut self.rng, &paths, tags, &stamp)?;
+        let (outcomes, last_usn) = insert_files(&tx, &mut self.rng, &paths, &stored_paths, tags, &stamp)?;
         if let Some(usn) = last_usn {
             set_counter(&tx, usn)?;
         }
@@ -5364,6 +5355,8 @@ impl Writer {
     /// chosen file has another basename. Rekordbox's `modifyContentFilePath`
     /// does not write that column (7.2.19 arm64, #454). Auto Relocate keeps
     /// its existing writer path while its UI remains hidden under #415.
+    /// Ordinary local paths use the library's base-drive namespace, as import
+    /// does; cloud and base-prefix-exempt rows retain their existing policy.
     pub fn relocate_manual_with_undo(&mut self, moves: &[(String, PathBuf)]) -> Result<(Changed, TrackRelocation)> {
         self.relocate_with_name_policy(moves, true)
     }
@@ -5388,6 +5381,7 @@ impl Writer {
                 )));
             }
         }
+        let mapping = preserve_name.then(|| self.library.drive_mapping()).flatten();
         self.prepare()?;
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
         let usn = next_usn(&tx)?;
@@ -5408,8 +5402,17 @@ impl Writer {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default())
             };
+            let ordinary = preserve_name && tx.query_row(
+                "SELECT (COALESCE(ContentLink, 0) & ?2) = 0 AND COALESCE(ServiceID, 0) = 0 FROM djmdContent WHERE ID = ?1",
+                params![content, SPECIAL_PATH_LINKS], |row| row.get::<_, bool>(0),
+            )?;
+            let folder = if ordinary {
+                stored_file_path(path, mapping.as_ref())?
+            } else {
+                path.to_string_lossy().into_owned()
+            };
             let after = [
-                Value::Text(path.to_string_lossy().into_owned()),
+                Value::Text(folder),
                 name,
                 Value::Text(crate::file_id::column(path)),
             ];
@@ -5885,6 +5888,134 @@ fn registry_counter(conn: &Connection) -> Result<i64> {
     )?)
 }
 
+// The cloud resolver and stock base-prefix exemption have distinct ownership.
+// Other ContentLink bits do not change the ordinary local path contract.
+const SPECIAL_PATH_LINKS: i64 = crate::track_path::CLOUD_SHARED | 0x80;
+
+struct ImportPath {
+    raw: String,
+    folder: String,
+    aliases: Vec<String>,
+}
+
+impl ImportPath {
+    fn existing_id(&self, conn: &Connection) -> Result<Option<String>> {
+        let mut found = None;
+        for alias in &self.aliases {
+            let id = conn.query_row(
+                "SELECT ID FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0
+                 AND (?2 OR ((COALESCE(ContentLink, 0) & ?3) = 0 AND COALESCE(ServiceID, 0) = 0))
+                 ORDER BY ID LIMIT 1",
+                params![alias, alias == &self.raw, SPECIAL_PATH_LINKS], |row| row.get::<_, String>(0),
+            ).optional()?;
+            merge_import_id(&mut found, id.as_ref())?;
+        }
+        Ok(found)
+    }
+
+    fn new(path: &Path, mapping: Option<&crate::DriveMapping>) -> Result<Self> {
+        Self::from_native(&path.to_string_lossy(), mapping, cfg!(windows))
+    }
+
+    fn from_native(raw: &str, mapping: Option<&crate::DriveMapping>, windows: bool) -> Result<Self> {
+        // Ordinary Windows drive paths use unified spelling in the database.
+        // A Unix filename may contain a literal backslash; the physical PathBuf
+        // used for tags and rb_file_id is never changed.
+        let unified = import_path_spelling(raw, windows);
+        let folder = stored_folder(raw, &unified, mapping)?;
+        let mut aliases = vec![folder.clone()];
+        for alias in [raw, &unified] {
+            // A preserved old-base spelling must not acquire the other
+            // volume's canonical alias just because separators were unified.
+            if alias == unified.as_str() && folder == raw && mapping.is_some_and(|m| m.apply(alias) != alias) {
+                continue;
+            }
+            if !aliases.iter().any(|held| held == alias) {
+                aliases.push(alias.to_owned());
+            }
+        }
+        if windows && has_drive_root(&unified) {
+            let native = unified.replace('/', "\\");
+            for spelling in [&unified, &native] {
+                for uppercase in [true, false] {
+                    let mut alias = spelling.clone();
+                    if uppercase { alias[..1].make_ascii_uppercase(); } else { alias[..1].make_ascii_lowercase(); }
+                    // Drive-letter case is equivalent on Windows; the tail
+                    // is exact. Never reintroduce an unsafe base-drive alias.
+                    if folder == raw && mapping.is_some_and(|m| m.apply(&alias) != alias) {
+                        continue;
+                    }
+                    if !aliases.contains(&alias) {
+                        aliases.push(alias);
+                    }
+                }
+            }
+        }
+        Ok(Self { raw: raw.to_owned(), folder, aliases })
+    }
+}
+
+fn has_drive_root(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':' && matches!(bytes[2], b'/' | b'\\')
+}
+
+fn import_path_spelling(raw: &str, windows: bool) -> String {
+    if windows && has_drive_root(raw) {
+        raw.replace('\\', "/")
+    } else {
+        // UNC, device/verbatim prefixes and relative paths keep their native
+        // spelling: ordinary drive-letter portability proves nothing for them.
+        raw.to_owned()
+    }
+}
+
+fn stored_folder(raw: &str, unified: &str, mapping: Option<&crate::DriveMapping>) -> Result<String> {
+    let folder = if let Some(mapping) = mapping {
+        match mapping.store(unified) {
+            std::borrow::Cow::Owned(stored) => stored,
+            std::borrow::Cow::Borrowed(_) => {
+                if mapping.apply(unified) == unified {
+                    unified.to_owned()
+                } else {
+                    // An off-volume path already in the base namespace must
+                    // not become a different current-volume file. Keep a
+                    // legacy spelling the reader leaves untouched, or refuse.
+                    if mapping.apply(raw) != raw {
+                        return Err(DbError::WriteRefused("file path conflicts with the library's base drive mapping".to_owned()));
+                    }
+                    raw.to_owned()
+                }
+            }
+        }
+    } else {
+        unified.to_owned()
+    };
+    Ok(folder)
+}
+
+fn stored_file_path(path: &Path, mapping: Option<&crate::DriveMapping>) -> Result<String> {
+    let raw = path.to_string_lossy();
+    let unified = import_path_spelling(&raw, cfg!(windows));
+    stored_folder(&raw, &unified, mapping)
+}
+
+fn import_paths(library: &Library, paths: &[PathBuf]) -> Vec<Result<ImportPath>> {
+    let mapping = library.drive_mapping();
+    paths.iter().map(|path| ImportPath::new(path, mapping.as_ref())).collect()
+}
+
+fn merge_import_id(found: &mut Option<String>, next: Option<&String>) -> Result<()> {
+    if let Some(next) = next {
+        if found.as_ref().is_some_and(|id| id != next) {
+            return Err(DbError::Conflict("different tracks occupy the file's stored and current paths".to_owned()));
+        }
+        *found = Some(next.clone());
+    }
+    Ok(())
+}
+
 /// The rows [`Writer::import_files`] makes, inside a transaction the caller
 /// owns: one outcome per path, in order, and the last USN used, if any, for
 /// the caller to set the counter to before it commits.
@@ -5892,6 +6023,7 @@ fn insert_files(
     tx: &Connection,
     rng: &mut Rng,
     paths: &[PathBuf],
+    stored_paths: &[Result<ImportPath>],
     tags: Vec<std::result::Result<crate::import::TrackTags, crate::import::ImportError>>,
     stamp: &str,
 ) -> Result<(Vec<ImportOutcome>, Option<i64>)> {
@@ -5909,17 +6041,23 @@ fn insert_files(
     // `track_id_at` answers it. One pass over the table, kept for the
     // paths of this batch only.
     let wanted: std::collections::HashSet<String> =
-        paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
-    let mut held: HashMap<String, String> = HashMap::new();
+        stored_paths.iter().filter_map(|p| p.as_ref().ok()).flat_map(|p| p.aliases.iter().cloned()).collect();
+    let mut held: HashMap<String, (String, Option<String>)> = HashMap::new();
     {
         let mut stmt = tx.prepare(
-            "SELECT FolderPath, ID FROM djmdContent WHERE rb_local_deleted = 0 ORDER BY ID",
+            "SELECT FolderPath, ID, (COALESCE(ContentLink, 0) & ?1) = 0 AND COALESCE(ServiceID, 0) = 0
+             FROM djmdContent WHERE rb_local_deleted = 0 ORDER BY ID",
         )?;
-        let mut rows = stmt.query([])?;
+        let mut rows = stmt.query([SPECIAL_PATH_LINKS])?;
         while let Some(row) = rows.next()? {
             let folder: Option<String> = row.get(0)?;
             if let Some(folder) = folder.filter(|f| wanted.contains(f)) {
-                held.entry(folder).or_insert(row.get::<_, String>(1)?);
+                let id: String = row.get(1)?;
+                let ordinary: bool = row.get(2)?;
+                let entry = held.entry(folder).or_insert_with(|| (id.clone(), None));
+                if ordinary && entry.1.is_none() {
+                    entry.1 = Some(id);
+                }
             }
         }
     }
@@ -5929,10 +6067,28 @@ fn insert_files(
     let mut last_usn: Option<i64> = None;
     let mut outcomes = Vec::with_capacity(paths.len());
 
-    for (path, tags) in paths.iter().zip(tags) {
-        let folder = path.to_string_lossy().into_owned();
-        if let Some(id) = held.get(&folder) {
-            outcomes.push(ImportOutcome::Existing(id.clone()));
+    for ((path, stored), tags) in paths.iter().zip(stored_paths).zip(tags) {
+        let stored = match stored {
+            Ok(stored) => stored,
+            Err(error) => {
+                outcomes.push(ImportOutcome::Refused(error.to_string()));
+                continue;
+            }
+        };
+        let folder = &stored.folder;
+        let mut existing = None;
+        let identity = stored.aliases.iter().try_for_each(|alias| {
+            let next = held.get(alias).and_then(|(any, ordinary)| {
+                if alias == &stored.raw { Some(any) } else { ordinary.as_ref() }
+            });
+            merge_import_id(&mut existing, next)
+        });
+        if let Err(error) = identity {
+            outcomes.push(ImportOutcome::Refused(error.to_string()));
+            continue;
+        }
+        if let Some(id) = existing {
+            outcomes.push(ImportOutcome::Existing(id));
             continue;
         }
         let tags = match tags {
@@ -5979,7 +6135,7 @@ fn insert_files(
         insert_content(
             tx,
             &NewContent {
-                id: &id, uuid: &uuid, folder: &folder, file_name: &file_name, path, tags: &tags,
+                id: &id, uuid: &uuid, folder, file_name: &file_name, path, tags: &tags,
                 artist: &artist, album: &album, genre: &genre, label: &label, key: &key, credits: &credits,
                 today: &today, stamp, master_db: &master_db, device: &device, usn,
             },
@@ -5988,7 +6144,7 @@ fn insert_files(
             DbError::WriteRefused("local update counter overflow".into())
         })?);
         last_usn = Some(usn);
-        held.insert(folder, id.clone());
+        held.insert(folder.clone(), (id.clone(), Some(id.clone())));
         outcomes.push(ImportOutcome::Added(id));
     }
     Ok((outcomes, last_usn))
@@ -7186,5 +7342,34 @@ fn prune_backups(dir: &Path, keep: usize) {
             drop(std::fs::remove_file(with_suffix(&path, suffix)));
         }
         drop(std::fs::remove_file(path));
+    }
+}
+
+#[cfg(test)]
+mod import_path_tests {
+    use super::ImportPath;
+    use crate::DriveMapping;
+
+    #[test]
+    fn native_import_path_spelling_and_inverse_mapping() -> Result<(), Box<dyn std::error::Error>> {
+        let mapping = DriveMapping::new("/Volumes/Shared/", "E:/").ok_or("mapping")?;
+        let stored = ImportPath::from_native(r"e:\Music\Mixed Case.wav", Some(&mapping), true)?;
+        assert_eq!(stored.folder, "/Volumes/Shared/Music/Mixed Case.wav");
+        assert!(stored.aliases.contains(&r"e:\Music\Mixed Case.wav".to_owned()));
+        assert!(stored.aliases.contains(&r"E:\Music\Mixed Case.wav".to_owned()));
+        assert_eq!(ImportPath::from_native(r"C:\Other\file.wav", Some(&mapping), true)?.folder, "C:/Other/file.wav");
+        assert_eq!(ImportPath::from_native(r"/tmp/a\b.wav", None, false)?.folder, r"/tmp/a\b.wav");
+        assert_eq!(ImportPath::from_native(r"C:\Default.wav", None, true)?.folder, "C:/Default.wav");
+        for special in [r"\\?\C:\Long\file.wav", r"\\server\share\file.wav", r"relative\file.wav", r"C:relative\file.wav"] {
+            assert_eq!(ImportPath::from_native(special, None, true)?.folder, special);
+        }
+        let reverse = DriveMapping::new("X:/", "Y:/").ok_or("mapping")?;
+        assert_eq!(ImportPath::from_native(r"X:\off-volume.wav", Some(&reverse), true)?.folder, r"X:\off-volume.wav");
+        assert!(ImportPath::from_native("X:/off-volume.wav", Some(&reverse), true).is_err());
+        assert_eq!(ImportPath::from_native("Y:/Music.wav", Some(&reverse), true)?.folder, "X:/Music.wav");
+        assert_eq!(ImportPath::from_native("YY:/Music.wav", Some(&reverse), true)?.folder, "YY:/Music.wav");
+        let off_volume = ImportPath::from_native(r"X:\off-volume.wav", Some(&reverse), true)?;
+        assert_eq!(off_volume.aliases, vec![r"X:\off-volume.wav", r"x:\off-volume.wav"]);
+        Ok(())
     }
 }

@@ -26,6 +26,11 @@ fn fixture_with(shape: Shape) -> Fixture {
     Fixture { _dir: dir, writer }
 }
 
+fn local_import_folder(path: &std::path::Path) -> String {
+    let raw = path.to_string_lossy();
+    if cfg!(windows) { raw.replace('\\', "/") } else { raw.into_owned() }
+}
+
 fn fixture() -> Fixture {
     fixture_with(Shape::default())
 }
@@ -1243,7 +1248,7 @@ fn a_track_can_be_pointed_at_a_moved_file() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!(folder, moved.to_string_lossy());
+    assert_eq!(folder, local_import_folder(&moved));
     assert_eq!(name, "track000.mp3", "manual Relocate leaves rekordbox's stored filename intact");
 }
 
@@ -1370,7 +1375,8 @@ fn manual_relocate_keeps_filename_and_link_state_across_drive_and_usn_cases() {
                 let before = link(&f, &track_id(0));
                 let (_, edit) = f.writer.relocate_manual_with_undo(&[(track_id(0), chosen.clone())]).unwrap();
                 let after = link(&f, &track_id(0));
-                assert_eq!(after.0.as_deref(), Some(chosen.to_string_lossy().as_ref()));
+                let expected = if mapped_drive { chosen.to_string_lossy().into_owned() } else { local_import_folder(&chosen) };
+                assert_eq!(after.0.as_deref(), Some(expected.as_str()));
                 assert_eq!(after.1, before.1, "same={same_name}, usn={source_usn}, mapped={mapped_drive}");
                 assert_eq!(after.2.as_deref(), Some(rbl_db::file_id::column(&chosen).as_str()));
                 let state: (i64, i64, i64) = f.conn().query_row(
@@ -1933,7 +1939,7 @@ fn an_import_carries_what_rekordbox_needs_to_open_the_file() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?)),
         )
         .unwrap();
-    assert_eq!(folder, path.to_string_lossy());
+    assert_eq!(folder, local_import_folder(&path));
     assert_eq!((file_type, depth), (11, 16), "a 16-bit wav");
     assert_eq!(stock.len(), 10, "{stock}");
     assert_eq!(stock, created);
@@ -1986,7 +1992,7 @@ fn an_import_records_where_the_file_is_and_how_long_it_runs() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
-    assert_eq!(folder, path.to_string_lossy());
+    assert_eq!(folder, local_import_folder(&path));
     assert_eq!(name, "Track.wav");
     assert_eq!(length, 3);
 }
@@ -2460,12 +2466,12 @@ fn a_rekordbox_xml_document_is_imported_with_its_playlists_and_cues() {
 
     let (rating, comment): (i64, String) = f
         .conn()
-        .query_row("SELECT Rating, Commnt FROM djmdContent WHERE FolderPath = ?1", [one.to_string_lossy()], |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_row("SELECT Rating, Commnt FROM djmdContent WHERE FolderPath = ?1", [local_import_folder(&one)], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();
     assert_eq!((rating, comment.as_str()), (3, "hi"));
     let kinds: Vec<(i64, i64, i64)> = {
         let mut stmt = f.conn().prepare("SELECT Kind, InMsec, OutMsec FROM djmdCue WHERE ContentID = (SELECT ID FROM djmdContent WHERE FolderPath = ?1) AND rb_local_deleted = 0 ORDER BY InMsec").unwrap();
-        stmt.query_map([one.to_string_lossy()], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(-1)))).unwrap().map(|r| r.unwrap()).collect()
+        stmt.query_map([local_import_folder(&one)], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(-1)))).unwrap().map(|r| r.unwrap()).collect()
     };
     assert_eq!(kinds, vec![(1, 250, -1), (3, 500, 1000), (0, 1500, -1)]);
     let folder: String = f.one("SELECT ID FROM djmdPlaylist WHERE Name = 'Sets' AND Attribute = 1", &[]);
@@ -2564,8 +2570,8 @@ fn importing_the_same_rekordbox_xml_twice_doubles_nothing() {
             .unwrap();
         stmt.query_map([playlist], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
     };
-    assert_eq!(members(&f, &same[0]), vec![one.to_string_lossy().into_owned()]);
-    assert_eq!(members(&f, &same[1]), vec![two.to_string_lossy().into_owned()]);
+    assert_eq!(members(&f, &same[0]), vec![local_import_folder(&one)]);
+    assert_eq!(members(&f, &same[1]), vec![local_import_folder(&two)]);
 
     // A newer export of the same collection with a track added to a playlist
     // replaces that playlist with the document's three tracks, and nothing
@@ -2577,9 +2583,9 @@ fn importing_the_same_rekordbox_xml_twice_doubles_nothing() {
     assert_eq!(
         members(&f, &warm_up),
         vec![
-            one.to_string_lossy().into_owned(),
-            two.to_string_lossy().into_owned(),
-            three.to_string_lossy().into_owned()
+            local_import_folder(&one),
+            local_import_folder(&two),
+            local_import_folder(&three)
         ],
     );
     assert_eq!(f.track_numbers(&warm_up), vec![1, 2, 3]);
@@ -2655,7 +2661,7 @@ fn reimporting_an_xml_replaces_the_same_named_playlist_with_the_documents() {
     let current: String = f.one("SELECT ID FROM djmdPlaylist WHERE rb_local_deleted = 0 AND Name = 'Warm up'", &[]);
     assert_eq!(current, warm_up, "the playlist is replaced where it stands, not doubled");
     let titles = members(&f, &warm_up);
-    let title_of = |p: &std::path::Path| f.one::<String>("SELECT Title FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0", &[&p.to_string_lossy().into_owned()]);
+    let title_of = |p: &std::path::Path| f.one::<String>("SELECT Title FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0", &[&local_import_folder(p)]);
     assert_eq!(titles, vec![title_of(&paths[2]), title_of(&paths[0])]);
     assert_eq!(f.track_numbers(&warm_up), vec![1, 2]);
     assert_eq!(members(&f, &own).len(), 1, "a list the document does not name is left alone");
@@ -5214,7 +5220,7 @@ fn files_named_with_accents_import_and_keep_their_exact_path() {
             .unwrap();
         let path = file.to_str().unwrap();
         let file_name = file.file_name().unwrap().to_str().unwrap();
-        assert_eq!(folder, path.as_bytes(), "FolderPath of {path}");
+        assert_eq!(folder, local_import_folder(file).as_bytes(), "FolderPath of {path}");
         assert_eq!(name, file_name.as_bytes(), "FileNameL of {path}");
         // An untagged file is titled after its name, accents and all.
         assert_eq!(title, file.file_stem().unwrap().to_str().unwrap());
@@ -5834,4 +5840,122 @@ fn zero_bpm_metadata_and_grid_revisions_are_bound_to_the_planned_row() {
     assert!(f.writer.set_bpm_metadata(&id, 15000, path, 0).is_err());
     assert!(f.writer.set_bpm_metadata("missing", 0, "", 0).is_err());
     assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&track_id(2)]), 12802);
+}
+
+
+fn shared_master_paths_fixture() -> (Fixture, std::path::PathBuf, std::path::PathBuf) {
+    let f = fixture();
+    let root = f._dir.path().to_string_lossy().replace('\\', "/");
+    let current = if cfg!(windows) { root[..3].to_owned() } else { format!("{root}/") };
+    f.conn().execute("UPDATE djmdProperty SET BaseDBDrive = 'X:/', CurrentDBDrive = ?1", [&current]).unwrap();
+    let first = f._dir.path().join("Shared First.wav");
+    let second = f._dir.path().join("Shared Second.wav");
+    write_wav(&first, 1);
+    write_wav(&second, 1);
+    (f, first, second)
+}
+
+fn shared_master_folder(f: &Fixture, path: &std::path::Path) -> String {
+    let (base, current): (String, String) = f.conn().query_row(
+        "SELECT BaseDBDrive, CurrentDBDrive FROM djmdProperty", [], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    let physical = path.to_string_lossy().replace('\\', "/");
+    format!("{base}{}", physical.strip_prefix(&current).unwrap())
+}
+
+#[test]
+fn shared_master_paths_single_batch_and_lookup_use_base_namespace() {
+    let (mut f, first, second) = shared_master_paths_fixture();
+    let stored_first = shared_master_folder(&f, &first);
+    let stored_second = shared_master_folder(&f, &second);
+    let id = f.writer.import_file(&first).unwrap();
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&id]), stored_first);
+    assert_eq!(std::path::PathBuf::from(f.writer.library().real_folder_path(&stored_first)), first);
+    assert_eq!(f.writer.track_id_at(&first).unwrap(), Some(id.clone()));
+    let outcomes = f.writer.import_files(&[first.clone(), second.clone(), second.clone()]).unwrap();
+    assert!(matches!(&outcomes[0], rbl_db::write::ImportOutcome::Existing(found) if found == &id));
+    let rbl_db::write::ImportOutcome::Added(second_id) = &outcomes[1] else { panic!("new second track") };
+    assert!(matches!(&outcomes[2], rbl_db::write::ImportOutcome::Existing(found) if found == second_id));
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[second_id]), stored_second);
+    assert!(f.writer.import_file(&first).is_err());
+}
+
+#[test]
+fn shared_master_paths_legacy_raw_row_is_existing_without_rewrite() {
+    let (mut f, first, _) = shared_master_paths_fixture();
+    f.conn().execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![first.to_string_lossy(), track_id(0)]).unwrap();
+    assert_eq!(f.writer.track_id_at(&first).unwrap(), Some(track_id(0)));
+    let outcomes = f.writer.import_files(std::slice::from_ref(&first)).unwrap();
+    assert!(matches!(&outcomes[0], rbl_db::write::ImportOutcome::Existing(found) if found == &track_id(0)));
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]), first.to_string_lossy());
+}
+
+#[test]
+fn shared_master_paths_manual_relocate_repairs_same_id_and_undo_restores_raw() {
+    let (mut f, first, _) = shared_master_paths_fixture();
+    let stored = shared_master_folder(&f, &first);
+    let id = track_id(0);
+    let raw = first.to_string_lossy().into_owned();
+    f.conn().execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![raw, id]).unwrap();
+    let old_name: String = f.one("SELECT FileNameL FROM djmdContent WHERE ID = ?1", &[&id]);
+    let (_, edit) = f.writer.relocate_manual_with_undo(&[(id.clone(), first.clone())]).unwrap();
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&id]), stored);
+    assert_eq!(f.one::<String>("SELECT FileNameL FROM djmdContent WHERE ID = ?1", &[&id]), old_name);
+    assert_eq!(f.one::<String>("SELECT rb_file_id FROM djmdContent WHERE ID = ?1", &[&id]), rbl_db::file_id::column(&first));
+    f.writer.undo_relocation(&edit).unwrap();
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&id]), raw);
+    f.writer.redo_relocation(&edit).unwrap();
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&id]), stored);
+}
+
+
+#[test]
+fn shared_master_paths_alias_conflict_refuses_only_that_batch_file() {
+    let (mut f, first, second) = shared_master_paths_fixture();
+    f.conn().execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![first.to_string_lossy(), track_id(0)]).unwrap();
+    f.conn().execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![shared_master_folder(&f, &first), track_id(1)]).unwrap();
+    assert!(matches!(f.writer.track_id_at(&first), Err(DbError::Conflict(_))));
+    assert!(f.writer.import_file(&first).is_err());
+    let outcomes = f.writer.import_files(&[first, second]).unwrap();
+    assert!(matches!(&outcomes[0], rbl_db::write::ImportOutcome::Refused(_)));
+    assert!(matches!(&outcomes[1], rbl_db::write::ImportOutcome::Added(_)));
+}
+
+#[test]
+fn shared_master_paths_manual_mac_base_and_cloud_policy() {
+    let (mut f, first, _) = shared_master_paths_fixture();
+    f.conn().execute("UPDATE djmdProperty SET BaseDBDrive = '/Volumes/Original/'", []).unwrap();
+    let stored = shared_master_folder(&f, &first);
+    let id = track_id(0);
+    let raw = first.to_string_lossy().into_owned();
+    f.conn().execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![raw, id]).unwrap();
+    let (_, edit) = f.writer.relocate_manual_with_undo(&[(id.clone(), first.clone())]).unwrap();
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&id]), stored);
+    f.writer.undo_relocation(&edit).unwrap();
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&id]), raw);
+    f.writer.redo_relocation(&edit).unwrap();
+    assert_eq!(std::path::PathBuf::from(f.writer.library().real_folder_path(&stored)), first);
+    f.conn().execute("UPDATE djmdContent SET ContentLink = 128 WHERE ID = ?1", [&id]).unwrap();
+    f.writer.relocate_manual_with_undo(&[(id.clone(), first.clone())]).unwrap();
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&id]), raw);
+}
+
+
+#[test]
+fn shared_master_paths_extra_aliases_exclude_cloud_but_keep_exact_raw_and_normal_bits() {
+    let (mut f, first, second) = shared_master_paths_fixture();
+    let old = track_id(0);
+    f.conn().execute("UPDATE djmdContent SET FolderPath = ?1, ContentLink = ?2 WHERE ID = ?3", params![shared_master_folder(&f, &first), rbl_db::track_path::CLOUD_SHARED, old]).unwrap();
+    assert_eq!(f.writer.track_id_at(&first).unwrap(), None);
+    let outcomes = f.writer.import_files(std::slice::from_ref(&first)).unwrap();
+    assert!(matches!(&outcomes[0], rbl_db::write::ImportOutcome::Added(_)));
+    f.conn().execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = ?2", params![second.to_string_lossy(), old]).unwrap();
+    assert_eq!(f.writer.track_id_at(&second).unwrap(), Some(old.clone()));
+    let outcomes = f.writer.import_files(std::slice::from_ref(&second)).unwrap();
+    assert!(matches!(&outcomes[0], rbl_db::write::ImportOutcome::Existing(id) if id == &old));
+    let stored = shared_master_folder(&f, &second);
+    f.conn().execute("UPDATE djmdContent SET FolderPath = ?1, ContentLink = 1 WHERE ID = ?2", params![stored, old]).unwrap();
+    assert_eq!(f.writer.track_id_at(&second).unwrap(), Some(old.clone()));
+    f.writer.relocate_manual_with_undo(&[(old.clone(), second)]).unwrap();
+    assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&old]), stored);
 }

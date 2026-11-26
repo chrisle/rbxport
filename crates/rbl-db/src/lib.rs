@@ -432,16 +432,27 @@ impl DriveMapping {
     /// rekordbox's `replaceDrivePath` does; anything else unchanged.
     #[must_use]
     pub fn apply<'a>(&self, path: &'a str) -> std::borrow::Cow<'a, str> {
-        let mut rest = path.char_indices();
-        for want in self.base.chars() {
-            match rest.next() {
-                Some((_, got)) if got == want || got.to_lowercase().eq(want.to_lowercase()) => {}
-                _ => return std::borrow::Cow::Borrowed(path),
-            }
-        }
-        let tail = rest.next().map_or("", |(i, _)| &path[i..]);
-        std::borrow::Cow::Owned(format!("{}{tail}", self.current))
+        replace_drive_prefix(path, &self.base, &self.current)
     }
+
+    /// Inverse of the reader substitution for a newly imported local file.
+    /// rekordbox 7.2.19 macOS arm64 `dsqlAddTrack` stores Base + suffix(Current) when
+    /// the working path starts with Current (case-insensitively).
+    pub(crate) fn store<'a>(&self, path: &'a str) -> std::borrow::Cow<'a, str> {
+        replace_drive_prefix(path, &self.current, &self.base)
+    }
+}
+
+fn replace_drive_prefix<'a>(path: &'a str, from: &str, to: &str) -> std::borrow::Cow<'a, str> {
+    let mut rest = path.char_indices();
+    for want in from.chars() {
+        match rest.next() {
+            Some((_, got)) if got == want || got.to_lowercase().eq(want.to_lowercase()) => {}
+            _ => return std::borrow::Cow::Borrowed(path),
+        }
+    }
+    let tail = rest.next().map_or("", |(i, _)| &path[i..]);
+    std::borrow::Cow::Owned(format!("{to}{tail}"))
 }
 
 /// rekordbox's `tools::UnifiedFilePath::getDrivePathFromFilePath(path, true)`

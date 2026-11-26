@@ -254,7 +254,8 @@ fn copied_files_become_tracks_and_take_their_place_in_the_devices_order() {
         .conn()
         .query_row("SELECT FolderPath FROM djmdContent WHERE ID = ?1", params![new_a], |r| r.get(0))
         .unwrap();
-    assert_eq!(folder, a.to_string_lossy());
+    let expected = if cfg!(windows) { a.to_string_lossy().replace('\\', "/") } else { a.to_string_lossy().into_owned() };
+    assert_eq!(folder, expected);
     assert_eq!(
         f.entries(&made.id),
         vec![(1, track_id(4)), (2, new_a.clone()), (3, track_id(2)), (4, new_b), (5, new_a)]
