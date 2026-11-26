@@ -419,3 +419,41 @@ future-compatibility notice for dependency `block` 0.1.6. Physical R1 acceptance
 remains open. Logs: `/Users/chrisle/r1-research/captures/20261108-r1-integration`.
 The local dev checkout is `/Users/chrisle/code/rbxport-worktrees/dev-r1-landing`;
 no push or release is authorized by this local integration.
+
+## Shared dev publication — 2026-11-26
+
+The eight unpublished local dev commits were replayed onto shared dev
+`b8bab1d9e5e87174eda6d79573b916de2906dd0a` in a separate worktree. Original
+local dev `15dab7b2` is retained by `codex/xdj-r1-before-push-20261126`;
+the original `codex/xdj-r1-sync` worktree remains untouched.
+
+R1 collision checking now participates in the shared audio preparation used
+by preview and execution, while retaining the newer capacity preflight and
+SQLite SHM conflict handling. Native lookup always checks `PIONEER`, including
+when normal libraries use `.PIONEER`. Sync Manager retains drive-identity,
+loading and refresh behavior. The OFF request digest retains current dev's
+transform revision 6 and PDB layout 4. A generated hidden-root collision
+regression verifies that foreign native analysis stays intact.
+
+Newer collection-to-device playlist drops and loose-file playlist imports now
+capture the global R1 option too. The latter publishes its audio, playlist,
+normal libraries and Cbm set together through the existing export journal;
+older IPC callers still default OFF. The original in-place export API remains
+available with its default options. No preference was added per drive.
+
+Validation: 227 affected tests passed (R1/stock/in-place export, shared audio
+preparation, bounds, settings, Sync Manager, playlist-drop helper and backend
+IPC), plus UI type checking, production Rust Clippy with warnings denied and
+`git diff --check`. All fixtures are generated/disposable except the explicitly
+labelled stock captures. Full workspace/E2E and physical R1 tests were not rerun.
+
+Baseline failures were reproduced in a separate untouched checkout of shared
+dev: all-targets Rust Clippy rejects the unused `interrupted` test helper in
+`legacy_recovery.rs:1278`; frontend lint reports the same six unsafe-assignment
+errors in `AboutPane.tsx` and `Preferences.tsx`. These unrelated files were
+not changed. Detailed command logs are under
+`/Users/chrisle/r1-research/captures/20261126-r1-push`.
+
+The feature remains experimental and OFF by default. Physical R1 acceptance
+remains open. This work does not access or eject TRIODE2, modify an installed
+rekordbox library, merge into main, create a release or change release tags.

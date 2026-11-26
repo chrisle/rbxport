@@ -1027,6 +1027,18 @@ pub fn add_in_place_to_playlist(
     playlist_id: u32,
     sources: &[SourceTrack],
 ) -> Result<ExportReport> {
+    add_in_place_to_playlist_with_options(root, format, playlist_id, sources, &ExportOptions::default())
+}
+
+/// Add USB-resident files with the same immutable options as other exports.
+/// Device ownership and volume identity remain bound to this existing stick.
+pub fn add_in_place_to_playlist_with_options(
+    root: &Path,
+    format: device_library::Format,
+    playlist_id: u32,
+    sources: &[SourceTrack],
+    options: &ExportOptions<'_>,
+) -> Result<ExportReport> {
     use device_library::Format;
     let volume = rbl_core::durable::VolumeIdentity::capture(root)?;
     let legacy = device_library::read(root, Format::DeviceLibrary)?;
@@ -1102,7 +1114,7 @@ pub fn add_in_place_to_playlist(
             expected_volume: Some(&volume),
             db_id_override: Some(db_id),
             my_tag_master_db_id_override: Some(tag_id),
-            ..Default::default()
+            ..*options
         },
         &mut |_| {},
     )

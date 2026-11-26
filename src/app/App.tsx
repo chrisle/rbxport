@@ -2875,7 +2875,7 @@ function AppBody() {
       try {
         const backend = await getBackend();
         if (drag.sourceKind === "folder" && drag.ids.some((id) => id.startsWith("file:"))) {
-          const result = await backend.devicePlaylistAddFiles(ref.path, ref.format, ref.id, [...drag.ids]);
+          const result = await backend.devicePlaylistAddFiles(ref.path, ref.format, ref.id, [...drag.ids], xdjR1Support);
           if (result.changed > 0) report(t("Added to {name}.", { name: node.name }));
           await deviceLibraries.refresh(ref.path);
           setDevices(await backend.listDevices());
@@ -2890,7 +2890,7 @@ function AppBody() {
           })()
           : await prepareDevicePlaylistDrop(
             backend, ref.path, ref.format, ref.id, drag.ids, stickDefaults, compatibilityFormat,
-            askDuplicates, node.name,
+            askDuplicates, node.name, xdjR1Support,
           );
         if (edit === null) return;
         if (edit.tracks.length === 0) return;
@@ -2905,7 +2905,7 @@ function AppBody() {
         setSyncing(false);
       }
     })();
-  }, [draggedTracks, deviceBusy, stickDefaults, compatibilityFormat, askDuplicates, deviceLibraries, report, refuse, t]);
+  }, [draggedTracks, deviceBusy, stickDefaults, compatibilityFormat, xdjR1Support, askDuplicates, deviceLibraries, report, refuse, t]);
   const createOnDevice = useCallback(
     (parent: TreeNode, folder: boolean) => {
       const at = deviceParentFor(parent);

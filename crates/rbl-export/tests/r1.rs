@@ -84,7 +84,7 @@ fn r1_off_preserves_current_dev_request_and_database_id_invalidation() {
         &tracks, &playlists, &tags, options.compatibility, options.keep_unlisted,
         format!("{:?}", options.sync), options.db_id_override,
         options.my_tag_master_db_id_override, format!("{:?}", options.defaults),
-        incremental::TRANSFORM_VERSION, 2_u32,
+        incremental::TRANSFORM_VERSION, 4_u32,
     )).unwrap();
     assert_eq!(incremental::request(&tracks, &playlists, &tags, &options).unwrap(), normal);
     options.db_id_override = Some(42);
@@ -339,6 +339,27 @@ fn a_foreign_hash_candidate_is_preserved_and_ppth_remains_unambiguous() {
             .unwrap(),
         audio
     );
+}
+#[test]
+fn hidden_root_preserves_foreign_native_hash_candidates() {
+    let dir = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let track = source(dir.path(), 1);
+    let canonical = native_dat("/Contents/Artist/Album/track1.wav");
+    let foreign = rbl_anlz::AnlzBuilder::new().path("/Contents/foreign.wav").finish();
+    let path = stick.path().join(&canonical);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, &foreign).unwrap();
+    let options = ExportOptions { root: Some(rbl_export::ExportRoot::Hidden), ..options(true) };
+    let report = rbl_export::export_with_options(stick.path(), &[track], &[], &[], &options, &mut |_| {}).unwrap();
+    assert!(report.verified);
+    assert_eq!(std::fs::read(&path).unwrap(), foreign);
+    let library = set(stick.path());
+    let parsed = cbm::parse_contents(&library[cbm::FILES[0]]).unwrap();
+    let audio = cbm::audio_path(&parsed.records[0]).unwrap();
+    assert_ne!(native_dat(&audio), canonical);
+    assert_eq!(rbl_anlz::Anlz::read(&stick.path().join(native_dat(&audio))).unwrap().path().unwrap(), audio);
+    assert!(rbl_export::verify(stick.path()).unwrap().is_ok());
 }
 #[test]
 fn a_partial_r1_publication_rolls_back_when_its_new_generation_is_invalid() {

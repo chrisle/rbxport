@@ -1120,7 +1120,7 @@ export interface Backend {
    */
   devicePlaylistEdit(path: string, format: DeviceFormat, edit: DevicePlaylistEdit): Promise<DevicePlaylistEditResult>;
   /** Analyse files already on this stick and add them to an existing device playlist in one publication. */
-  devicePlaylistAddFiles(path: string, format: DeviceFormat, playlist: string, tracks: string[]): Promise<DevicePlaylistEditResult>;
+  devicePlaylistAddFiles(path: string, format: DeviceFormat, playlist: string, tracks: string[], xdjR1Support?: boolean): Promise<DevicePlaylistEditResult>;
   /**
    * The rows of `tracks` whose track a stick playlist already holds, each
    * once: what rekordbox asks Add or Skip about before adding. Only reads.

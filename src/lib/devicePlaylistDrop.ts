@@ -18,6 +18,7 @@ export async function prepareDevicePlaylistDrop(
   compatibility: Parameters<Backend["exportTracksToDevice"]>[3],
   askDuplicates: (held: number, total: number, name: string) => Promise<boolean | null>,
   name: string,
+  xdjR1Support = false,
 ): Promise<Extract<DevicePlaylistEdit, { kind: "add" }> | null> {
   if (ids.length === 0) return null;
 
@@ -29,7 +30,7 @@ export async function prepareDevicePlaylistDrop(
   if (duplicates === null) return null;
 
   const missing = ids.filter((_, index) => before[index] === null);
-  if (missing.length > 0) await backend.exportTracksToDevice([...missing], path, defaults, compatibility);
+  if (missing.length > 0) await backend.exportTracksToDevice([...missing], path, defaults, compatibility, xdjR1Support);
 
   const after = await backend.devicePlaylistCollectionTracks(path, format, [...ids]);
   if (after.length !== ids.length || after.some((row) => row === null)) {

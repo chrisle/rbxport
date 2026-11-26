@@ -6,7 +6,7 @@ import { prepareDevicePlaylistDrop } from "./devicePlaylistDrop";
 const format: DeviceFormat = "deviceLibrary";
 
 describe("prepareDevicePlaylistDrop", () => {
-  it("exports only missing tracks, maps them to device ids, then honors Skip duplicates", async () => {
+  it.each([false, true])("exports only missing tracks with R1=%s, then honors Skip duplicates", async (enabled) => {
     const backend = {
       devicePlaylistCollectionTracks: vi.fn()
         .mockResolvedValueOnce(["device-1", null, "device-2"])
@@ -17,11 +17,11 @@ describe("prepareDevicePlaylistDrop", () => {
     const ask = vi.fn().mockResolvedValue(false);
 
     const edit = await prepareDevicePlaylistDrop(
-      backend, "/Volumes/TEST", format, "7", ["100", "101", "102"], undefined, undefined, ask, "Set",
+      backend, "/Volumes/TEST", format, "7", ["100", "101", "102"], undefined, undefined, ask, "Set", enabled,
     );
 
     expect(ask).toHaveBeenCalledWith(1, 3, "Set");
-    expect(backend.exportTracksToDevice).toHaveBeenCalledWith(["101"], "/Volumes/TEST", undefined, undefined);
+    expect(backend.exportTracksToDevice).toHaveBeenCalledWith(["101"], "/Volumes/TEST", undefined, undefined, enabled);
     expect(edit).toEqual({ kind: "add", playlist: "7", tracks: ["device-3", "device-2"], duplicates: false });
   });
 

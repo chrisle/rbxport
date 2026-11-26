@@ -314,6 +314,7 @@ pub async fn device_playlist_add_files(
     format: String,
     playlist: String,
     tracks: Vec<String>,
+    xdj_r1_support: Option<bool>,
 ) -> AppResult<DeviceEditResultDto> {
     blocking("device_playlist_add_files", move || {
         if let Some(refused) = edit_refusal(rbl_db::is_rekordbox_app_running()) {
@@ -366,7 +367,7 @@ pub async fn device_playlist_add_files(
             });
         }
         volume.check(&mount).map_err(|error| AppError::new(ErrorKind::NotFound, error.to_string()))?;
-        rbl_export::add_in_place_to_playlist(&mount, format, playlist_id, &sources)
+        rbl_export::add_in_place_to_playlist_with_options(&mount, format, playlist_id, &sources, &rbl_export::ExportOptions { xdj_r1_support: xdj_r1_support.unwrap_or(false), ..Default::default() })
             .map_err(|error| device_error(&error))?;
         let after = device::read(&mount, format).map_err(|error| device_error(&error))?;
         let after_count = after.node(playlist_id).map_or(0, |node| node.tracks.len());
@@ -1824,7 +1825,7 @@ mod tests {
         let path = root.to_str().unwrap().to_owned();
         let id = playlist.id.to_string();
         let row = rbl_index::folder::loose_id(&wav);
-        let add = || tauri::async_runtime::block_on(device_playlist_add_files(path.clone(), "deviceLibrary".into(), id.clone(), vec![row.clone()]));
+        let add = || tauri::async_runtime::block_on(device_playlist_add_files(path.clone(), "deviceLibrary".into(), id.clone(), vec![row.clone()], None));
         assert_eq!(add().unwrap().changed, 1);
         let legacy = device::read(root, Format::DeviceLibrary).unwrap();
         let one = device::read(root, Format::OneLibrary).unwrap();
@@ -1850,6 +1851,31 @@ mod tests {
         assert_eq!(device::read(root, Format::OneLibrary).unwrap(), one);
         assert_eq!(std::fs::read(&wav).unwrap(), audio);
         assert_eq!(collection_count(), before_collection);
+    }
+
+    #[test]
+    fn loose_wav_r1_option_defaults_off_and_enables_additional_library() {
+        for enabled in [None, Some(true)] {
+            let dest = tempfile::tempdir().unwrap();
+            let root = dest.path();
+            rbl_export::export(root, &[], &[rbl_export::SourcePlaylist {
+                id: 1, name: "Generated R1 test".into(), ..Default::default()
+            }]).unwrap();
+            let playlist = device::read(root, Format::DeviceLibrary).unwrap().nodes[0].id;
+            let wav = root.join("generated.wav");
+            write_test_wav(&wav);
+            let before = std::fs::read(&wav).unwrap();
+            let result = tauri::async_runtime::block_on(device_playlist_add_files(
+                root.to_str().unwrap().into(), "deviceLibrary".into(), playlist.to_string(),
+                vec![rbl_index::folder::loose_id(&wav)], enabled,
+            )).unwrap();
+            assert_eq!(result.changed, 1);
+            for name in rbl_export::cbm::FILES {
+                assert_eq!(root.join("PIONEER/DBH").join(name).exists(), enabled.unwrap_or(false));
+            }
+            assert_eq!(std::fs::read(&wav).unwrap(), before);
+            assert!(rbl_export::verify(root).unwrap().is_ok());
+        }
     }
 
     fn write_test_wav(path: &Path) {
