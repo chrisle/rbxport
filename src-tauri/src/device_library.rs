@@ -575,7 +575,7 @@ pub async fn device_playlist_import_plan(
 /// the stick's analysis files (waveforms, beat grid, cues) and its cues,
 /// as rekordbox's import thread does for each track it copies [static,
 /// rekordbox 7.2.19 `importFromDeviceThread::run` @0x1001d9618] (see
-/// [`carry_stick_analysis`]). Tracks the collection already had are left
+/// [`prepare_stick_analysis`]). Tracks the collection already had are left
 /// as they are, as rekordbox leaves them.
 ///
 /// The stick is only read. The copies are made first, each checked against
@@ -783,23 +783,101 @@ fn copy_missing(
     Ok((entries, copies, carried))
 }
 
-/// [`carry_stick_analysis`] for every track an import added from a copy,
-/// `added` as the writer gives it and `carried` as [`copy_missing`] does.
-/// Says how many were given the stick's analysis and how many could not be;
-/// one that fails is left as the bare file the import added.
-fn carry_all(state: &AppState, mount: &Path, added: &[(String, PathBuf)], carried: &[(PathBuf, MissingFile)]) -> (usize, usize) {
-    let mut counts = (0, 0);
-    for (content, file) in added {
-        let Some((_, stick)) = carried.iter().find(|(copy, _)| copy == file) else { continue };
-        match carry_stick_analysis(state, mount, content, file, stick) {
-            Ok(()) => counts.0 += 1,
-            Err(error) => {
-                counts.1 += 1;
-                tracing::warn!(track = %content, error = %error, "could not give an imported device track its analysis");
-            }
-        }
+const DEVICE_IMPORT_BATCH_TRACKS: usize = 32;
+const DEVICE_IMPORT_BATCH_BYTES: usize = 32 << 20;
+
+struct ImportFileRevision {
+    size: u64,
+    modified: Option<std::time::SystemTime>,
+    identity: Option<rbl_core::durable::FileIdentity>,
+    changed: Option<(i64, i64)>,
+}
+
+impl ImportFileRevision {
+    fn matches(&self, other: &Self) -> bool {
+        self.size == other.size
+            && self
+                .modified
+                .zip(other.modified)
+                .is_none_or(|(a, b)| a == b)
+            && self
+                .identity
+                .zip(other.identity)
+                .is_none_or(|(a, b)| a == b)
+            && self.changed.zip(other.changed).is_none_or(|(a, b)| a == b)
     }
-    counts
+}
+
+fn same_import_source(
+    left: Option<&(PathBuf, ImportFileRevision)>,
+    right: Option<&(PathBuf, ImportFileRevision)>,
+) -> bool {
+    match (left, right) {
+        (Some((a, before)), Some((b, after))) => a == b && before.matches(after),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+type SourceRevision = (PathBuf, Option<(PathBuf, ImportFileRevision)>);
+
+struct PreparedDeviceAnalysis {
+    content: String,
+    bpm: u32,
+    key: String,
+    files: Vec<(&'static str, Vec<u8>)>,
+    cues: Vec<rbl_anlz::CueEntry>,
+    source: Vec<SourceRevision>,
+}
+
+fn import_analysis_path(mount: &Path, relative: &Path) -> Option<PathBuf> {
+    let at = audio_path(mount, &relative.to_string_lossy());
+    let at = if at.exists() {
+        at
+    } else {
+        device::StickFiles::new(mount).locate(&relative.to_string_lossy())
+    };
+    (at.is_file() && plainly_under(mount, &at)).then_some(at)
+}
+
+fn import_file_revision(file: &std::fs::File) -> AppResult<ImportFileRevision> {
+    let metadata = file.metadata().map_err(|e| {
+        AppError::new(
+            ErrorKind::Malformed,
+            "The device's analysis could not be read.",
+        )
+        .with_detail(e.to_string())
+    })?;
+    #[cfg(unix)]
+    let changed = {
+        use std::os::unix::fs::MetadataExt;
+        Some((metadata.ctime(), metadata.ctime_nsec()))
+    };
+    #[cfg(not(unix))]
+    let changed = None;
+    Ok(ImportFileRevision {
+        size: metadata.len(),
+        modified: metadata.modified().ok(),
+        identity: rbl_core::durable::file_identity(file).ok(),
+        changed,
+    })
+}
+
+fn import_analysis_revision(
+    mount: &Path,
+    relative: &Path,
+) -> AppResult<Option<(PathBuf, ImportFileRevision)>> {
+    let Some(at) = import_analysis_path(mount, relative) else {
+        return Ok(None);
+    };
+    let file = std::fs::File::open(&at).map_err(|e| {
+        AppError::new(
+            ErrorKind::Malformed,
+            "The device's analysis could not be read.",
+        )
+        .with_detail(e.to_string())
+    })?;
+    Ok(Some((at, import_file_revision(&file)?)))
 }
 
 /// Gives `content`, a track Import Playlist just added from `copy` (a copy
@@ -822,62 +900,291 @@ fn carry_all(state: &AppState, mount: &Path, added: &[(String, PathBuf)], carrie
 /// [ASSUME: the stick's analysis cues are the ones its database lists; an
 /// export writes both from the same cues].
 /// The stick is only read, and only below its mount point.
-fn carry_stick_analysis(state: &AppState, mount: &Path, content: &str, copy: &Path, stick: &MissingFile) -> AppResult<()> {
-    let ppth = rbl_anlz::share_tree_ppth(&copy.to_string_lossy());
-    let read = |relative: &Path| -> AppResult<Option<rbl_anlz::Anlz>> {
-        let at = audio_path(mount, &relative.to_string_lossy());
-        let at = if at.exists() { at } else { device::StickFiles::new(mount).locate(&relative.to_string_lossy()) };
-        if !at.is_file() || !plainly_under(mount, &at) {
+/// Prepare only source images here: no collection writer or edit gate is held
+/// while USB payloads are read. Resolve companions by the existing import policy.
+fn prepare_stick_analysis(
+    mount: &Path,
+    content: &str,
+    copy: &Path,
+    stick: &MissingFile,
+) -> AppResult<PreparedDeviceAnalysis> {
+    let mut source = Vec::new();
+    let mut read = |relative: &Path| -> AppResult<Option<rbl_anlz::Anlz>> {
+        let Some(at) = import_analysis_path(mount, relative) else {
+            source.push((relative.to_path_buf(), None));
             return Ok(None);
+        };
+        let read_error = |e: std::io::Error| {
+            AppError::new(
+                ErrorKind::Malformed,
+                "The device's analysis could not be read.",
+            )
+            .with_detail(format!("{}: {e}", at.display()))
+        };
+        let mut file = std::fs::File::open(&at).map_err(read_error)?;
+        let before = import_file_revision(&file)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(read_error)?;
+        if !before.matches(&import_file_revision(&file)?) {
+            return Err(AppError::new(
+                ErrorKind::Malformed,
+                "The device's analysis changed during import.",
+            ));
         }
-        rbl_anlz::Anlz::read(&at)
-            .map(Some)
-            .map_err(|e| AppError::new(ErrorKind::Malformed, "The device's analysis could not be read.").with_detail(format!("{}: {e}", at.display())))
+        let anlz = rbl_anlz::parse(&bytes).map_err(|e| {
+            AppError::new(
+                ErrorKind::Malformed,
+                "The device's analysis could not be read.",
+            )
+            .with_detail(format!("{}: {e}", at.display()))
+        })?;
+        source.push((relative.to_path_buf(), Some((at, before))));
+        Ok(Some(anlz))
     };
     let dat_relative = Path::new(&stick.analysis);
-    let dat = if stick.analysis.trim().is_empty() { None } else { read(dat_relative)? };
-
-    let _gate = state.edit_gate.lock();
-    let _files = state.analysis_write.lock();
-    let location = state.location()?;
-    crate::file_journal::recover(state.backup_dir(), &location)?;
-    let key = Some(stick.key.as_str()).filter(|k| !k.is_empty());
-    let Some(dat) = dat else {
-        // Nothing analysed on the stick: the row's BPM and key only.
-        let analysis = rbl_db::write::DeviceAnalysis { bpm_x100: stick.bpm_x100, key, analysis_data_path: None, cues: &[] };
-        state.write(|w| w.import_device_analysis(content, &analysis)).map_err(crate::commands::write_error)?;
-        return Ok(());
+    let dat = if stick.analysis.trim().is_empty() {
+        None
+    } else {
+        read(dat_relative)?
     };
-    let ext = read(&dat_relative.with_extension("EXT"))?;
-    let two_ex = read(&dat_relative.with_extension("2EX"))?;
-    let cues = ext.as_ref().map_or_else(|| dat.legacy_cue_entries(), rbl_anlz::Anlz::cue_entries);
-
-    let relative = state.write(|w| w.analysis_data_path_for(content)).map_err(crate::commands::write_error)?;
-    let target = rbl_anlz::resolve(&location.share_root, &relative);
-    let mut files = vec![(target.clone(), dat.with_path(&ppth))];
-    for (extension, anlz) in [("EXT", &ext), ("2EX", &two_ex)] {
-        if let Some(anlz) = anlz {
-            files.push((rbl_anlz::sibling(&target, extension), anlz.with_path(&ppth)));
+    let mut files = Vec::new();
+    let mut cues = Vec::new();
+    if let Some(dat) = dat {
+        let ext = read(&dat_relative.with_extension("EXT"))?;
+        let two_ex = read(&dat_relative.with_extension("2EX"))?;
+        cues = ext
+            .as_ref()
+            .map_or_else(|| dat.legacy_cue_entries(), rbl_anlz::Anlz::cue_entries);
+        let ppth = rbl_anlz::share_tree_ppth(&copy.to_string_lossy());
+        files.push(("DAT", dat.with_path(&ppth)));
+        for (extension, anlz) in [("EXT", ext), ("2EX", two_ex)] {
+            if let Some(anlz) = anlz {
+                files.push((extension, anlz.with_path(&ppth)));
+            }
         }
     }
-    let bpm_after = if stick.bpm_x100 > 0 {
-        stick.bpm_x100
-    } else {
-        state
-            .read_db(|db| Ok(db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1", [content], |r| r.get::<_, u32>(0))?))
-            .map_err(crate::commands::write_error)?
-    };
-    let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, content, bpm_after, Some(relative.clone()), true, &files)?;
-    if let Err(e) = journal.publish() {
-        journal.rollback()?;
-        return Err(e);
+    Ok(PreparedDeviceAnalysis {
+        content: content.into(),
+        bpm: stick.bpm_x100,
+        key: stick.key.clone(),
+        files,
+        cues,
+        source,
+    })
+}
+
+/// One track still owns one durable journal and one row transaction. A failed
+/// row returns its journal so reconciliation can use persisted rows after the
+/// batch writer is dropped, including a commit followed by a reported error.
+fn write_stick_analysis(
+    writer: &mut rbl_db::write::Writer,
+    state: &AppState,
+    location: &rbl_db::LibraryLocation,
+    item: &mut PreparedDeviceAnalysis,
+    reconcile: &mut Option<crate::file_journal::FileJournal>,
+) -> AppResult<()> {
+    let key = Some(item.key.as_str()).filter(|k| !k.is_empty());
+    if item.files.is_empty() {
+        let analysis = rbl_db::write::DeviceAnalysis {
+            bpm_x100: item.bpm,
+            key,
+            analysis_data_path: None,
+            cues: &[],
+        };
+        writer
+            .import_device_analysis(&item.content, &analysis)
+            .map_err(crate::commands::write_error)?;
+        return Ok(());
     }
-    let analysis = rbl_db::write::DeviceAnalysis { bpm_x100: stick.bpm_x100, key, analysis_data_path: Some(&relative), cues: &cues };
-    if let Err(e) = state.write(|w| w.import_device_analysis(content, &analysis)) {
-        journal.reconcile(&location)?;
-        return Err(crate::commands::write_error(e));
+    let relative = writer
+        .analysis_data_path_for(&item.content)
+        .map_err(crate::commands::write_error)?;
+    let target = rbl_anlz::resolve(&location.share_root, &relative);
+    let files: Vec<_> = std::mem::take(&mut item.files)
+        .into_iter()
+        .map(|(extension, bytes)| {
+            (
+                if extension == "DAT" {
+                    target.clone()
+                } else {
+                    rbl_anlz::sibling(&target, extension)
+                },
+                bytes,
+            )
+        })
+        .collect();
+    let bpm_after = if item.bpm > 0 {
+        item.bpm
+    } else {
+        writer
+            .library()
+            .connection()
+            .query_row(
+                "SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1",
+                [&item.content],
+                |r| r.get::<_, u32>(0),
+            )
+            .map_err(|e| crate::commands::write_error(e.into()))?
+    };
+    let journal = crate::file_journal::FileJournal::prepare_with(
+        writer.library(),
+        state.backup_dir(),
+        location,
+        &item.content,
+        bpm_after,
+        Some(relative.clone()),
+        true,
+        &files,
+    )?;
+    if let Err(error) = journal.publish() {
+        journal.rollback()?;
+        return Err(error);
+    }
+    let analysis = rbl_db::write::DeviceAnalysis {
+        bpm_x100: item.bpm,
+        key,
+        analysis_data_path: Some(&relative),
+        cues: &item.cues,
+    };
+    if let Err(error) = writer.import_device_analysis(&item.content, &analysis) {
+        *reconcile = Some(journal);
+        return Err(crate::commands::write_error(error));
     }
     journal.commit()
+}
+
+fn apply_stick_analysis_batch(
+    state: &AppState,
+    mount: &Path,
+    mut batch: Vec<PreparedDeviceAnalysis>,
+    counts: &mut (usize, usize),
+) {
+    if batch.is_empty() {
+        return;
+    }
+    let _gate = state.edit_gate.lock();
+    let _files = state.analysis_write.lock();
+    let mut next = 0;
+    while next < batch.len() {
+        let mut outcomes = Vec::new();
+        let mut reconcile = None;
+        let prepared = state.location().and_then(|location| {
+            crate::file_journal::recover(state.backup_dir(), &location)?;
+            let written = state.write(|writer| {
+                while next < batch.len() {
+                    let item = &mut batch[next];
+                    // Only metadata/identity checks here; USB payload reads
+                    // happened before opening the bounded batch's writer.
+                    let result = item
+                        .source
+                        .iter()
+                        .try_for_each(|(relative, expected)| {
+                            if same_import_source(
+                                expected.as_ref(),
+                                import_analysis_revision(mount, relative)?.as_ref(),
+                            ) {
+                                Ok(())
+                            } else {
+                                Err(AppError::new(
+                                    ErrorKind::Malformed,
+                                    "The device's analysis changed during import.",
+                                ))
+                            }
+                        })
+                        .and_then(|()| {
+                            write_stick_analysis(writer, state, &location, item, &mut reconcile)
+                        });
+                    let failed = result.is_err();
+                    outcomes.push(result);
+                    next += 1;
+                    if failed {
+                        break;
+                    }
+                }
+                Ok(())
+            });
+            written.map_err(crate::commands::write_error)?;
+            if let Some(journal) = reconcile {
+                if let Err(error) = journal.reconcile(&location) {
+                    // Original precedence: a reconciliation refusal replaces
+                    // the row error and leaves its evidence for the next try.
+                    if let Some(result) = outcomes.last_mut() {
+                        *result = Err(error);
+                    }
+                }
+            }
+            Ok(())
+        });
+        if let Err(error) = prepared {
+            outcomes.push(Err(error));
+            next += 1;
+        }
+        let first = next - outcomes.len();
+        for (item, result) in batch[first..next].iter().zip(outcomes) {
+            match result {
+                Ok(()) => counts.0 += 1,
+                Err(error) => {
+                    counts.1 += 1;
+                    tracing::warn!(track = %item.content, error = %error, "could not give an imported device track its analysis");
+                }
+            }
+        }
+    }
+}
+
+/// Source preparation is bounded independently of each track's transaction.
+/// Per-track failures preserve the successful prefix and continue in order.
+fn carry_all(
+    state: &AppState,
+    mount: &Path,
+    added: &[(String, PathBuf)],
+    carried: &[(PathBuf, MissingFile)],
+) -> (usize, usize) {
+    let mut counts = (0, 0);
+    let mut batch = Vec::new();
+    let mut bytes = 0_usize;
+    for (content, file) in added {
+        let Some((_, stick)) = carried.iter().find(|(copy, _)| copy == file) else {
+            continue;
+        };
+        match prepare_stick_analysis(mount, content, file, stick) {
+            Ok(item) => {
+                let size = item
+                    .files
+                    .iter()
+                    .map(|(_, bytes)| bytes.len())
+                    .sum::<usize>();
+                if !batch.is_empty() && bytes.saturating_add(size) > DEVICE_IMPORT_BATCH_BYTES {
+                    apply_stick_analysis_batch(
+                        state,
+                        mount,
+                        std::mem::take(&mut batch),
+                        &mut counts,
+                    );
+                    bytes = 0;
+                }
+                bytes = bytes.saturating_add(size);
+                batch.push(item);
+                if batch.len() >= DEVICE_IMPORT_BATCH_TRACKS || bytes >= DEVICE_IMPORT_BATCH_BYTES {
+                    apply_stick_analysis_batch(
+                        state,
+                        mount,
+                        std::mem::take(&mut batch),
+                        &mut counts,
+                    );
+                    bytes = 0;
+                }
+            }
+            Err(error) => {
+                apply_stick_analysis_batch(state, mount, std::mem::take(&mut batch), &mut counts);
+                bytes = 0;
+                counts.1 += 1;
+                tracing::warn!(track = %content, error = %error, "could not give an imported device track its analysis");
+            }
+        }
+    }
+    apply_stick_analysis_batch(state, mount, batch, &mut counts);
+    counts
 }
 
 /// What [`copy_missing`] gives: the entries to write, the copies it made,
@@ -3584,4 +3891,8 @@ mod tests {
             assert!(elapsed < std::time::Duration::from_secs(10), "{format:?}: 600-track browser fixture took {elapsed:?}");
         }
     }
+    mod copied_analysis_tests {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/copied_device_analysis_tests.rs"));
+    }
+
 }
