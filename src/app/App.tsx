@@ -699,7 +699,7 @@ function AppBody() {
    * the library is open read-only" arrive the same way and are not the same
    * kind of news.
    */
-  const [note, setNote] = useState<{ text: string; failed: boolean; busy?: boolean } | null>(null);
+  const [note, setNote] = useState<{ text: string; failed: boolean; busy?: boolean; persistent?: boolean } | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
@@ -2328,9 +2328,10 @@ function AppBody() {
     })();
   }, [refuse]);
 
-  // Clear the note after a moment: it reports an action, not a state.
+  // Ordinary action notes expire. A direct export failure stays readable
+  // until another action replaces it, with its existing link to the log.
   useEffect(() => {
-    if (note === null || note.busy) return;
+    if (note === null || note.busy || note.persistent) return;
     const timer = setTimeout(() => setNote(null), note.failed ? 10000 : 4000);
     return () => {
       clearTimeout(timer);
@@ -3099,12 +3100,14 @@ function AppBody() {
    * the device panel and AppleScript's `export`.
    */
   const writeToDevice = useCallback(
-    async (playlistId: string, device: { name: string; path: string }): Promise<string> => {
+    async (playlistId: string, device: { name: string; path: string }, options: { retainFailure?: boolean } = {}): Promise<string> => {
       setSyncing(true);
       report(t("Writing to {device}…", { device: device.name }));
+      let writeCompleted = false;
       try {
         const backend = await getBackend();
         const written = await backend.exportPlaylist(playlistId, device.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat, xdjR1Support);
+        writeCompleted = true;
         const said = exportSummary(device.name, written, t);
         report(said);
         setDevices(await backend.listDevices());
@@ -3114,6 +3117,7 @@ function AppBody() {
           ? "Export stopped."
           : e instanceof Error ? e.message : "That export could not be written.";
         if (said === "Export stopped.") report(said);
+        else if (options.retainFailure && !writeCompleted) setNote({ text: said, failed: true, persistent: true });
         else refuse(said);
         throw new Error(said, { cause: e });
       } finally {
@@ -3208,7 +3212,7 @@ function AppBody() {
       return;
     }
     // Said in the note already; nothing else to do with it here.
-    void writeToDevice(node.id, device).catch(() => undefined);
+    void writeToDevice(node.id, device, { retainFailure: true }).catch(() => undefined);
   }, [devices, refuse, t, writeToDevice]);
 
   // The top of the current view, kept only to write the next start's opening

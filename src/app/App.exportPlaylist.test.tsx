@@ -14,6 +14,8 @@ const held = vi.hoisted(() => ({
   devices: [] as Device[],
   devicesChanged: null as (() => void) | null,
   exportPlaylist: vi.fn(),
+  script: null as Parameters<Backend["serveScripts"]>[0] | null,
+  menuKind: "playlist",
   menuChoice: null as (() => void) | null,
   currentExport: null as ((node: TreeNode, path: string) => void) | null,
   menuDevices: [] as { id: string; name: string }[],
@@ -36,7 +38,7 @@ vi.mock("@/views/tree/TreeView", () => ({
     held.menuDevices = props.exportDevices;
     held.currentExport = props.onExport;
     return <button onClick={() => {
-      const clicked: TreeNode = { id: "playlist-clicked", name: "Clicked", kind: "playlist", depth: 0, childCount: 1 };
+      const clicked: TreeNode = { id: "playlist-clicked", name: "Clicked", kind: held.menuKind === "folder" ? "folder" : "playlist", depth: 0, childCount: 1 };
       const path = props.exportDevices[0]?.id;
       if (path) held.menuChoice = () => held.currentExport?.(clicked, path);
     }}>Open playlist export menu</button>;
@@ -44,8 +46,8 @@ vi.mock("@/views/tree/TreeView", () => ({
 }));
 
 vi.mock("@/views/statusbar/StatusBar", () => ({
-  StatusBar: ({ activity, error }: { activity: string; error: string | null }) =>
-    <div><span data-testid="activity">{activity}</span><span role="alert">{error}</span></div>,
+  StatusBar: ({ activity, error, onShowLog }: { activity: string; error: string | null; onShowLog: () => void }) =>
+    <div><span data-testid="activity">{activity}</span><span role="alert">{error && <button onClick={onShowLog}>{error}</button>}</span></div>,
 }));
 
 // Exercise App's own translated strings, without the DOM text localizer.
@@ -80,15 +82,18 @@ beforeEach(async () => {
   vi.clearAllMocks();
   held.devices = [device];
   held.devicesChanged = null;
+  held.menuKind = "playlist";
   held.menuChoice = null;
   held.currentExport = null;
   held.menuDevices = [];
+  held.script = null;
   const { createMockBackend } = await import("@/ipc/backend-mock");
   held.backend = {
     ...createMockBackend({ trackCount: 1 }),
     listDevices: () => Promise.resolve(held.devices),
     onDevicesChanged: (listener) => { held.devicesChanged = listener; return () => { held.devicesChanged = null; }; },
     exportPlaylist: held.exportPlaylist,
+    serveScripts: (handle) => { held.script = handle; return () => { held.script = null; }; },
   };
   host = document.createElement("div");
   document.body.append(host);
@@ -98,6 +103,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -138,4 +144,79 @@ it("exports the clicked playlist to a current destination and reports translated
       playlistsAdded: 1, playlistsRemoved: 0, skipped: [], failed: [], verified: true });
     await Promise.resolve();
   });
+});
+
+
+it.each(["folder", "playlist"] as const)("retains %s export failure and log access until the next export action", async (kind) => {
+  held.menuKind = kind;
+  held.exportPlaylist.mockRejectedValueOnce(new Error("Owned USB export failure: Ànne / &"));
+  await mountAndOpenMenu();
+  vi.useFakeTimers();
+  await act(async () => { held.menuChoice?.(); await Promise.resolve(); });
+  expect(held.exportPlaylist).toHaveBeenCalledTimes(1);
+  expect(held.exportPlaylist.mock.calls[0]?.slice(0, 2)).toEqual(["playlist-clicked", device.path]);
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Owned USB export failure: Ànne / &");
+  await act(async () => { await vi.advanceTimersByTimeAsync(9999); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Owned USB export failure: Ànne / &");
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Owned USB export failure: Ànne / &");
+  expect(held.exportPlaylist).toHaveBeenCalledTimes(1);
+  const openLog = vi.spyOn(held.backend!, "openLogWindow").mockResolvedValue(true);
+  await act(async () => { host.querySelector<HTMLButtonElement>('[role="alert"] button')?.click(); await Promise.resolve(); });
+  expect(openLog).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Owned USB export failure: Ànne / &");
+  held.exportPlaylist.mockImplementationOnce(() => new Promise(() => {}));
+  await act(async () => { held.menuChoice?.(); await Promise.resolve(); });
+  expect(held.exportPlaylist).toHaveBeenCalledTimes(2);
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("");
+  expect(host.querySelector('[data-testid="activity"]')?.textContent).toBe("Ich schreibe an USB Test…");
+});
+
+
+it("keeps an ordinary refusal on its existing timeout", async () => {
+  await mountAndOpenMenu();
+  vi.useFakeTimers();
+  held.devices = [];
+  await act(async () => { held.devicesChanged?.(); await Promise.resolve(); });
+  act(() => { held.menuChoice?.(); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Das Gerät ist nicht mehr verbunden.");
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("");
+});
+
+it("keeps stopped exports on the existing success-note timeout", async () => {
+  held.exportPlaylist.mockRejectedValueOnce({ kind: "cancelled" });
+  await mountAndOpenMenu();
+  vi.useFakeTimers();
+  await act(async () => { held.menuChoice?.(); await Promise.resolve(); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("");
+  expect(host.querySelector('[data-testid="activity"]')?.textContent).toBe("Export stopped.");
+  await act(async () => { await vi.advanceTimersByTimeAsync(4001); });
+  expect(host.querySelector('[data-testid="activity"]')?.textContent).toBe("");
+});
+
+it("keeps AppleScript export errors and replies on their existing path", async () => {
+  held.exportPlaylist.mockRejectedValueOnce(new Error("Script export refused"));
+  await mountAndOpenMenu();
+  vi.useFakeTimers();
+  let reply: Awaited<ReturnType<Parameters<Backend["serveScripts"]>[0]>> | undefined;
+  await act(async () => { reply = await held.script?.({ id: 1, action: "export", args: { playlist: "script-playlist", device } }); });
+  expect(reply).toEqual({ error: "Script export refused" });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Script export refused");
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("");
+});
+
+
+it("does not retain a device refresh error after a successful direct export", async () => {
+  held.exportPlaylist.mockResolvedValueOnce({ tracks: 0, playlists: 1, bytesCopied: 0, analysisFiles: 0,
+    reused: 0, removed: 0, tracksAdded: 0, tracksUpdated: 0,
+    playlistsAdded: 1, playlistsRemoved: 0, skipped: [], failed: [], verified: true });
+  await mountAndOpenMenu();
+  vi.spyOn(held.backend!, "listDevices").mockRejectedValueOnce(new Error("Refresh refused"));
+  vi.useFakeTimers();
+  await act(async () => { held.menuChoice?.(); await Promise.resolve(); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Refresh refused");
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("");
 });

@@ -6,6 +6,10 @@ USB export writes player libraries and audio copies to a device. These
 preferences apply to playlist export and Sync Manager; compatibility
 conversion also applies to individual track export.
 
+If **Export Folder** or **Export Playlist** from the tree menu fails, its
+status-bar error remains visible instead of expiring. Click the message to
+open the log.
+
 ## Import from a USB device
 
 Sync Manager has two actions. **SYNC** writes the ticked playlists to the
