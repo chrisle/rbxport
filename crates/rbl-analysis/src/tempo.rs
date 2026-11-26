@@ -597,6 +597,11 @@ struct Fit {
     period: f64,
 }
 
+struct FitSupport {
+    strength: f64,
+    predicted_beats: i64,
+}
+
 /// Fits a constant-tempo grid to `from..to` of the envelope near `bpm`.
 fn fit(reader: Reader<'_>, bpm: f64, from: usize, to: usize, options: TempoOptions) -> Option<Fit> {
     let slice = reader.values.get(from..to)?;
@@ -607,11 +612,9 @@ fn fit(reader: Reader<'_>, bpm: f64, from: usize, to: usize, options: TempoOptio
     let period = refine_period(slice, coarse, options.refine_phases);
     let phase = best_phase(slice, period, 64);
     // The comb's phase may be on the off-beat: hats and an off-beat bass
-    // carry as much flux as the kick. With the kick attacks to read, the
-    // line is fitted from both halves of the beat and the one that collects
-    // more kick is the grid. Measured on the golden playlist, the kick
-    // detector tells the beat from the midpoint on 150 of 155 rekordbox
-    // grids.
+    // carry as much flux as the kick. An attack map lets the fitter try both
+    // halves. Compare strength per predicted beat so an extra beat at the
+    // edge of the fitting window cannot win by adding another hit.
     let starts: &[f64] = if reader.attacks.is_some() { &[0.0, 0.5] } else { &[0.0] };
     let mut best: Option<(Fit, f64)> = None;
     for &half in starts {
@@ -622,7 +625,7 @@ fn fit(reader: Reader<'_>, bpm: f64, from: usize, to: usize, options: TempoOptio
         for _ in 0..3 {
             let Some((next, kept)) = snap_and_fit(reader, from, to, fit, None) else { break };
             fit = next;
-            support = kept;
+            support = kept.strength / kept.predicted_beats as f64;
         }
         if best.is_none_or(|(_, s)| support > s) {
             best = Some((fit, support));
@@ -791,12 +794,12 @@ fn best_phase(values: &[f64], period: f64, phases: usize) -> f64 {
 /// and fits a line through the snapped ones, weighted by the hit's
 /// strength.
 ///
-/// Also returns the total strength of the hits the line was fitted
-/// through, so two candidate lines can be compared.
+/// Returns retained hit strength and the number of predicted beats for
+/// the same fitting pass, including predictions with no accepted hit.
 ///
 /// With `fixed_period`, only the phase is fitted: the line is kept at that
 /// period and placed through the hits' weighted centre.
-fn snap_and_fit(reader: Reader<'_>, from: usize, to: usize, current: Fit, fixed_period: Option<f64>) -> Option<(Fit, f64)> {
+fn snap_and_fit(reader: Reader<'_>, from: usize, to: usize, current: Fit, fixed_period: Option<f64>) -> Option<(Fit, FitSupport)> {
     let period = current.period;
     if period < 2.0 {
         return None;
@@ -882,7 +885,10 @@ fn snap_and_fit(reader: Reader<'_>, from: usize, to: usize, current: Fit, fixed_
     if (slope - period).abs() > period * 0.02 {
         return None;
     }
-    let support = kept.iter().map(|&(_, _, w)| w).sum::<f64>();
+    let support = FitSupport {
+        strength: kept.iter().map(|&(_, _, w)| w).sum(),
+        predicted_beats: last - first + 1,
+    };
     Some((Fit { phase: intercept, period: slope }, support))
 }
 
@@ -959,7 +965,7 @@ pub fn fit_report(onsets: &OnsetEnvelope, attacks: Option<&AttackMap>, bpm: f64,
             for _ in 0..3 {
                 let Some((next, kept)) = snap_and_fit(reader, 0, n, fit, None) else { break };
                 fit = next;
-                support = kept;
+                support = kept.strength;
                 passes.push(onsets.rate * 60.0 / fit.period);
             }
             (passes, support)

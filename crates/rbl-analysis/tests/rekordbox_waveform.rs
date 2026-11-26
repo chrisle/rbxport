@@ -12,9 +12,39 @@ mod signals;
 
 use std::path::PathBuf;
 
-use rbl_analysis::wave_creator::{WaveCreator, Waves};
+use rbl_analysis::{analyse_grid_with, wave_creator::{WaveCreator, Waves}, AnalysisPreset};
 use rbl_anlz::Anlz;
 use signals::{Signal, SIGNALS};
+
+/// Check the retained beat times at either end of the generated kick-hat
+/// grids. At 44.1 kHz the competing half phase had one more predicted beat
+/// and won on total strength despite weaker support per prediction.
+#[test]
+fn kick_hat_grid_matches_rekordbox_endpoint_phase() {
+    const FIXTURES: [(&str, &[u8]); 2] = [
+        ("kick-hats", include_bytes!("rekordbox_waveform/kick-hats.EXT")),
+        ("kick-hats-48k", include_bytes!("rekordbox_waveform/kick-hats-48k.EXT")),
+    ];
+    for (name, bytes) in FIXTURES {
+        let signal = SIGNALS.iter().find(|signal| signal.name == name).unwrap();
+        let reference = rbl_anlz::parse(bytes).unwrap();
+        let extended = reference.section(b"PQT2").unwrap();
+        let word = |at| u32::from_be_bytes(extended.header[at..at + 4].try_into().unwrap());
+        let expected = [word(16), word(24)];
+        let mono: Vec<f32> = (signal.frames)(signal.rate).into_iter()
+            .map(|[left, right]| (f32::from(left) + f32::from(right)) / 65536.0)
+            .collect();
+
+        for preset in [AnalysisPreset::Rbxport, AnalysisPreset::Rekordbox] {
+            let grid = analyse_grid_with(&mono, signal.rate, preset.options());
+            let actual = [grid.beats.first().unwrap().time_ms, grid.beats.last().unwrap().time_ms];
+            assert!(actual.into_iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 2),
+                "{name} {preset:?}: endpoints {actual:?}, expected {expected:?}");
+            assert_eq!(grid.beats.len(), word(28) as usize, "{name} {preset:?}");
+            assert!((grid.bpm - 125.0).abs() <= 0.02, "{name} {preset:?}: {}", grid.bpm);
+        }
+    }
+}
 
 /// The 3Band waveform: the gain exactly, the overview and the detail as
 /// rekordbox draws them.

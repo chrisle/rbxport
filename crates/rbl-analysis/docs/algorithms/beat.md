@@ -86,8 +86,10 @@ it (a breakdown, a beatless intro) is left unplaced and does not pull the
 line in step 4.
 
 The line is fitted twice, from the comb's phase and from half a beat
-later, and the one that collects more kick is kept. The phrase-structure
-stage ([Downbeat](downbeat.md)) still has the last word on which half
+later. The fitter compares retained attack strength per predicted beat
+from the same pass. An extra prediction at the edge of the fitting window
+does not increase a phase's score on its own. The phrase-structure stage
+([Downbeat](downbeat.md)) still has the last word on which half
 of the beat the kicks are on: it is right on 153 of the 155 reference
 grids where the kick alone is right on 150, the kick's misses being
 off-beat claps with a sharper transient than the kick.
