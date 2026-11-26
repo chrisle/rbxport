@@ -29,14 +29,15 @@ fn copied_import_controls_matched_and_unusable_sources() {
     .unwrap();
     assert_eq!((zero.tracks, zero.copied, zero.analysed), (2, 0, 0));
     assert_eq!(app.state::<Arc<AppState>>().writer_opens() - opens, 1);
-    assert!(files_under(output.path()).is_empty());
+    assert_eq!(files_under(output.path()), Vec::<String>::new());
     assert_eq!(contents_under(rig.stick.path()), before);
 
     // Separate generated state: a device names a source it cannot supply.
     rig.came_from_elsewhere(0);
     rig.came_from_elsewhere(1);
     let source = rig.sticks_file(0);
-    let held = rig._src.path().join("held-export.wav");
+    let held_dir = tempfile::tempdir().unwrap();
+    let held = held_dir.path().join("held-export.wav");
     std::fs::rename(&source, &held).unwrap();
     let before = contents_under(rig.stick.path());
     let collection = contents_under(rig.dir.path());
@@ -52,7 +53,7 @@ fn copied_import_controls_matched_and_unusable_sources() {
     ));
     assert!(refused.is_err());
     assert_eq!(app.state::<Arc<AppState>>().writer_opens(), opens);
-    assert!(files_under(output.path()).is_empty());
+    assert_eq!(files_under(output.path()), Vec::<String>::new());
     assert_eq!(contents_under(rig.stick.path()), before);
     assert_eq!(contents_under(rig.dir.path()), collection);
 }
@@ -127,16 +128,19 @@ fn copied_import_prefix_row_refusal_keeps_success_and_continues_no_dat() {
             .map(Result::unwrap)
             .collect();
         assert_eq!(rows.len(), 3);
-        assert!(!rows[0].1.is_empty());
+        assert_ne!(rows[0].1, "");
         assert_eq!((rows[0].2, rows[0].3), (12_800, 2));
         assert_eq!((rows[1].1.as_str(), rows[1].2, rows[1].3), ("", 0, 0));
         if last_without_dat {
             assert_eq!((rows[2].1.as_str(), rows[2].2, rows[2].3), ("", 12_800, 0));
         } else {
-            assert!(!rows[2].1.is_empty());
+            assert_ne!(rows[2].1, "");
             assert_eq!((rows[2].2, rows[2].3), (12_800, 2));
         }
-        assert!(files_under(&rig.dir.path().join("backups/analysis-journal")).is_empty());
+        assert_eq!(
+            files_under(&rig.dir.path().join("backups/analysis-journal")),
+            Vec::<String>::new()
+        );
         assert_eq!(contents_under(rig.stick.path()), before);
     }
 }
@@ -298,7 +302,10 @@ fn copied_import_crosses_batch_boundary_and_ends_redo_only_after_writes() {
             .unwrap();
         assert_eq!(cues, 2);
     }
-    assert!(files_under(&rig.dir.path().join("backups/analysis-journal")).is_empty());
+    assert_eq!(
+        files_under(&rig.dir.path().join("backups/analysis-journal")),
+        Vec::<String>::new()
+    );
 }
 
 #[cfg(unix)]
@@ -384,5 +391,8 @@ fn copied_import_flushes_source_images_at_the_byte_boundary() {
         "two source images exceed one byte-bounded batch"
     );
     assert_eq!(contents_under(rig.stick.path()), before);
-    assert!(files_under(&rig.dir.path().join("backups/analysis-journal")).is_empty());
+    assert_eq!(
+        files_under(&rig.dir.path().join("backups/analysis-journal")),
+        Vec::<String>::new()
+    );
 }
