@@ -1275,6 +1275,7 @@ mod tests {
         assert!(manifest(raw.replacen(&parsed.generation.structure, "", 1).as_bytes()).is_err());
     }
 
+    #[cfg(target_os = "linux")]
     fn interrupted(root: &Path, boundary: usize) -> io::Result<()> {
         let previous = STOP_AT.with(|stop| stop.replace(Some(boundary)));
         let result = crate::recover(root);

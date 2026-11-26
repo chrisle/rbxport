@@ -440,6 +440,8 @@ fn visit(
     Ok(())
 }
 
+// macOS propagates diskutil/UTF-8 errors; other targets share its Result API.
+#[cfg_attr(not(target_os = "macos"), allow(clippy::unnecessary_wraps))]
 fn device_block_bytes(root: &Path) -> Result<u32> {
     // [OBS] Stock queries Device Block Size, defaulting to 512. Read-only.
     #[cfg(target_os = "macos")]
