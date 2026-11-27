@@ -571,6 +571,42 @@ fn a_pause_is_not_playing_out_and_a_restart_clears_it() {
 }
 
 #[test]
+fn eof_restart_owns_its_seek_and_preserves_an_optional_quantized_wait() {
+    for wait in [0, 1_024] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("generated-restart.wav");
+        ramp(&path, 8_000);
+        let h = harness();
+        h.engine.load(Deck::A, &path);
+        h.wait_for_load(1);
+        h.engine.play(Deck::A);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while h.engine.snapshot().a.playing && Instant::now() < deadline {
+            h.sink.pull(512);
+        }
+        assert!(h.engine.snapshot().a.played_out);
+        // Drain the previous output-stage tail before measuring the restart.
+        h.sink.pull(4_096);
+        let previous = h.engine.snapshot().a;
+        if wait == 0 { h.engine.play(Deck::A); }
+        else { h.engine.play_after(Deck::A, wait); }
+        let requested = h.engine.snapshot().a;
+        assert_eq!(requested.load_id, previous.load_id);
+        assert_eq!(requested.position_frames, 0);
+        assert!(requested.generation > previous.generation);
+        assert_eq!(requested.start_in_frames, wait);
+        if wait > 0 {
+            let silent = h.sink.pull(usize::try_from(wait).unwrap());
+            assert!(silent.iter().all(|sample| sample.abs() < INAUDIBLE));
+            assert_eq!(h.engine.snapshot().a.position_frames, 0);
+        }
+        let audio = h.play_until(Deck::A, 2_048);
+        assert!(audio.iter().any(|sample| sample.abs() > 0.01));
+        assert!(h.engine.snapshot().a.position_frames >= 2_048);
+    }
+}
+
+#[test]
 fn moving_the_master_level_does_not_step() {
     // The level is read once a callback and used for the whole of it, so a
     // hand on the fader arrives as a staircase eleven milliseconds wide —
