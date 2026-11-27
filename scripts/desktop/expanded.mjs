@@ -33,18 +33,47 @@ export async function expanded(c) {
     command(native,['--close-window',String(c.pid()),'Preferences'],{timeout:15000});
     await until(async()=>!(await app().request({windows:true})).includes('preferences'),'Preferences closes');
   }
-  async function nativeDrop(files,targetSelector,{text,cancel=false,ignored=false}={}) {
+  async function nativeDrop(files,targetSelector,{text,cancel=false,ignored=false,verifySurface=false}={}) {
     command(native,['--layout',String(c.pid())],{timeout:30000});
     await until(()=>state('innerWidth===1200 && innerHeight===800'),'fixed 1200 × 800 viewport');
-    await state(`(() => { window.__desktopDrops=[];window.__desktopDrags=[];window.__desktopDragListener ??= e=>window.__desktopDrags.push({trusted:e.isTrusted,types:[...e.dataTransfer.types]});document.removeEventListener('dragenter',window.__desktopDragListener,true);document.addEventListener('dragenter',window.__desktopDragListener,true); window.__desktopDropListener ??= e=>window.__desktopDrops.push({trusted:e.isTrusted,names:[...e.dataTransfer.files].map(f=>f.name),types:[...e.dataTransfer.types]}); document.removeEventListener('drop',window.__desktopDropListener,true); document.addEventListener('drop',window.__desktopDropListener,true);return true;})()`);
     const at = await state(`(() => {
       const el = [...document.querySelectorAll(${JSON.stringify(targetSelector)})].find(e => ${text === undefined ? 'true' : `e.textContent.includes(${JSON.stringify(text)})`});
       if (!el) throw Error('Missing native drop target');
+      const surface = node => {
+        const receiver = node?.closest('[data-file-drop-playlist]');
+        if (!receiver) return null;
+        const kind = receiver.matches('[role="treeitem"]') ? 'tree' : 'list';
+        return {kind, playlist: receiver.dataset.fileDropPlaylist};
+      };
+      window.__desktopDrops = [];
+      window.__desktopDrags = [];
+      if (window.__desktopDragListener) {
+        document.removeEventListener('dragenter', window.__desktopDragListener, true);
+      }
+      if (window.__desktopDropListener) {
+        document.removeEventListener('drop', window.__desktopDropListener, true);
+      }
+      window.__desktopDragListener = e => {
+        window.__desktopDrags.push({trusted: e.isTrusted, types: [...e.dataTransfer.types]});
+      };
+      window.__desktopDropListener = e => {
+        const receiver = e.target instanceof Element ? e.target : null;
+        window.__desktopDrops.push({
+          trusted: e.isTrusted,
+          names: [...e.dataTransfer.files].map(file => file.name),
+          types: [...e.dataTransfer.types],
+          surface: surface(receiver),
+          intendedElement: el.contains(receiver),
+        });
+      };
+      document.addEventListener('dragenter', window.__desktopDragListener, true);
+      document.addEventListener('drop', window.__desktopDropListener, true);
+
       const bounds = el.getBoundingClientRect();
       const x = bounds.x + bounds.width * .65;
       const y = bounds.y + Math.min(bounds.height * .65, 300);
       const hit = document.elementFromPoint(x, y);
-      return {x, y, height: innerHeight, bounds: bounds.toJSON(), hit: hit?.tagName, hitTarget: el.contains(hit)};
+      return {x, y, height: innerHeight, bounds: bounds.toJSON(), hit: hit?.tagName, hitTarget: el.contains(hit), surface: surface(el)};
     })()`);
     const artifact = path.join(out, `native-drop-${c.resultCount()}.json`);
     const details = {files, targetSelector, text, at};
@@ -62,7 +91,17 @@ export async function expanded(c) {
     assert.ok(drags.some(e=>e.trusted && e.types.includes('Files')),'A trusted native file drag must enter the test window');
     if(cancel) assert.equal(drops.length,0,'Cancelled drag must not reach a drop handler');
     else if(ignored) {assert.ok(drops.length<=1);if(drops.length)assert.equal(drops[0].trusted,true);}
-    else { assert.equal(drops.length,1,'OS must deliver exactly one drop'); assert.equal(drops[0].trusted,true,'OS drop must be trusted'); assert.ok(drops[0].types.includes('Files')); }
+    else {
+      assert.equal(drops.length, 1, 'OS must deliver exactly one drop');
+      const [drop] = drops;
+      assert.equal(drop.trusted, true, 'OS drop must be trusted');
+      assert.ok(drop.types.includes('Files'));
+      if (verifySurface) {
+        assert.ok(at.surface, 'Expected an open collection or playlist drop surface');
+        assert.equal(drop.intendedElement, true, 'The trusted drop must land in the intended element');
+        assert.deepEqual(drop.surface, at.surface, 'Drop surface and playlist must match the intended target');
+      }
+    }
   }
   // A real outgoing drag of a playable fixture track, released on the
   // toolbar (a completed drag that lands nowhere) or cancelled with Escape.
@@ -180,7 +219,7 @@ export async function expanded(c) {
   async function verifyFinderImport(file, target, playlist) {
     await until(() => app().count(target), `writable drop target ${target}`);
     const before = database();
-    await nativeDrop([file], target);
+    await nativeDrop([file], target, {verifySurface: true});
     await waitText('footer', playlist ? `Added 1 track to ${playlist.name}.` : 'Imported 1 of 1 files.');
     const after = database();
     const imported = after.tracks.filter(track => track.path && existsSync(track.path) && canonical(track.path) === canonical(file));
