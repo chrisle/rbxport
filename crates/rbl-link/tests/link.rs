@@ -20,7 +20,7 @@ use alphatheta_connect::remotedb::{queries, Connection, LookupDescriptor, MenuTa
 use alphatheta_connect::types::{Device, DeviceType as ClientDeviceType, MediaSlot, TrackType};
 use rbl_db::fixture::{self, Shape};
 use rbl_db::{Library as Db, OpenMode};
-use rbl_dbserver::{kind, Argument};
+use rbl_dbserver::{kind, Argument, Message as DbMessage};
 use rbl_fakecdj::{database_port, mount, Database};
 use rbl_link::{Interface, LinkExport, Ports, StaticSource};
 use tokio::io::AsyncWriteExt;
@@ -259,6 +259,309 @@ fn a_second_player_only_sees_its_own_list() {
         .request(kind::RENDER, numbers(&[CTX, 0, 25, 0, 25, 0xc, 1, 0]))
         .unwrap();
     assert!(again.iter().all(|m| m.kind != kind::MENU_ITEM));
+    served.link.stop();
+}
+
+/// A one-playlist fixture whose members each carry a distinct synthetic
+/// preview, served on loopback.
+struct PlaylistServed {
+    _dir: tempfile::TempDir,
+    link: LinkExport,
+    /// The playlist's `djmdPlaylist.ID`.
+    playlist: u32,
+    /// The members' `djmdContent.ID`s in playlist order, each with the
+    /// `4402` blob its own `.DAT` must come back as.
+    previews: Vec<(u32, Vec<u8>)>,
+}
+
+/// How many tracks the playlist holds: enough for several render windows
+/// and for the right-aligned clamp of the last one.
+const PLAYLIST_MEMBERS: usize = 5;
+
+/// Builds the fixture: every member gets a `.DAT` whose 400 `PWAV` and 100
+/// `PWV2` columns are one value, different per track, so a preview served
+/// for the wrong track cannot pass as the right one. The expected reply is
+/// built from those same columns by the blob encoder the server uses.
+fn serve_playlist() -> PlaylistServed {
+    let dir = tempfile::tempdir().unwrap();
+    let shape = Shape {
+        tracks: PLAYLIST_MEMBERS,
+        playlists: 1,
+        tracks_per_playlist: PLAYLIST_MEMBERS,
+        history_sessions: 1,
+        start_usn: 1000,
+    };
+    let location = fixture::build(dir.path(), shape).unwrap();
+    let mut blobs = Vec::with_capacity(PLAYLIST_MEMBERS);
+    for index in 0..PLAYLIST_MEMBERS {
+        let step = u8::try_from(index).unwrap();
+        // Heights 3, 6, 9, 12, 15 under one whiteness bit; PWV2 2, 4, 6, 8,
+        // 10: all inside the ranges the encoder leaves unchanged.
+        let pwav = vec![0x40 | (3 + 3 * step); 400];
+        let pwv2 = vec![2 + 2 * step; 100];
+        let analysis = format!("/PIONEER/USBANLZ/P001/{index:08X}/ANLZ0000.DAT");
+        fixture::set_analysis_path(&location, index, &analysis).unwrap();
+        let dat = rbl_anlz::resolve(&location.share_root, &analysis);
+        fs::create_dir_all(dat.parent().unwrap()).unwrap();
+        fs::write(
+            &dat,
+            rbl_anlz::AnlzBuilder::new()
+                .waveform_preview(b"PWAV", &pwav)
+                .waveform_preview(b"PWV2", &pwv2)
+                .finish(),
+        )
+        .unwrap();
+        blobs.push(rbl_link::blobs::waveform_preview_blob(&pwav, &pwv2));
+    }
+
+    let db = Db::open(location.clone(), OpenMode::ReadOnly).unwrap();
+    let (library, _) = rbl_index::load(&db).unwrap();
+    let library = Arc::new(library);
+    // The oracle comes from the index, not from a rendered menu: the
+    // members in playlist order, each tied back to its fixture track by id.
+    let (playlist, previews) = {
+        let playlists = library.playlists();
+        let playlist = u32::try_from(playlists.ids[0]).unwrap();
+        let previews = playlists.members[0]
+            .iter()
+            .map(|&row| {
+                let id = u32::try_from(library.ids[row as usize]).unwrap();
+                let index = (0..PLAYLIST_MEMBERS)
+                    .find(|&index| fixture::track_id(index).parse() == Ok(id))
+                    .unwrap();
+                (id, blobs[index].clone())
+            })
+            .collect::<Vec<_>>();
+        (playlist, previews)
+    };
+    assert_eq!(previews.len(), PLAYLIST_MEMBERS);
+
+    let source = Arc::new(StaticSource {
+        library,
+        share_root: location.share_root.clone(),
+    });
+    let link = LinkExport::start(source, Interface::loopback(), Ports::EPHEMERAL).unwrap();
+    bring_up(&link);
+    PlaylistServed {
+        _dir: dir,
+        link,
+        playlist,
+        previews,
+    }
+}
+
+/// Asks for a menu and returns its row count, leaving the rows for render.
+fn open_menu(db: &mut Database, request: u16, args: &[u32]) -> u32 {
+    let header = db.request(request, numbers(args)).unwrap();
+    assert_eq!(header.len(), 1, "{header:?}");
+    assert_eq!(header[0].kind, kind::MENU_HEADER, "{header:?}");
+    let Argument::Number(count) = header[0].arguments[1] else {
+        panic!()
+    };
+    count
+}
+
+/// Renders one window of the menu at `CTX`'s location, as a player paging
+/// a list does: the offset the header names and the rows that follow.
+fn render_page(
+    db: &mut Database,
+    offset: u32,
+    limit: u32,
+    total: u32,
+) -> (u32, Vec<Vec<Argument>>) {
+    let mut messages = db
+        .request(kind::RENDER, numbers(&[CTX, offset, limit, 0, total, 0xc, 1, 0]))
+        .unwrap();
+    let mut header = None;
+    let mut rows = Vec::new();
+    loop {
+        assert!(!messages.is_empty(), "the session closed before the menu footer");
+        let mut batch = messages.into_iter();
+        while let Some(message) = batch.next() {
+            if message.kind == kind::RENDER_HEADER {
+                let Argument::Number(offset) = message.arguments[1] else {
+                    panic!("the render header did not name its offset")
+                };
+                assert!(header.replace((message.transaction, offset)).is_none(), "duplicate render header");
+                continue;
+            }
+            let (transaction, offset) = header.expect("rendered item or footer before the render header");
+            assert_eq!(message.transaction, transaction, "message belongs to another request");
+            match message.kind {
+                kind::MENU_ITEM => rows.push(message.arguments),
+                kind::MENU_FOOTER => {
+                    assert!(batch.next().is_none(), "extra message after the render footer");
+                    return (offset, rows);
+                }
+                other => panic!("{other:#06x} while rendering"),
+            }
+        }
+        messages = db.receive().unwrap();
+    }
+}
+
+/// The `4402` reply a preview blob goes out as: `[2004, 0, len, blob]`.
+fn preview_reply(blob: &[u8]) -> Vec<Argument> {
+    vec![
+        Argument::Number(u32::from(kind::WAVEFORM_PREVIEW)),
+        Argument::Number(0),
+        Argument::Number(u32::try_from(blob.len()).unwrap()),
+        Argument::Blob(blob.to_vec()),
+    ]
+}
+
+/// The preview of `track`, asked for in the shape the browse test above
+/// uses: `[ctx, 0, id, 0]`, the id in the third argument.
+fn preview_of(db: &mut Database, track: u32) -> Vec<Argument> {
+    let reply = db
+        .request(kind::WAVEFORM_PREVIEW, numbers(&[CTX, 0, track, 0]))
+        .unwrap();
+    assert_eq!(reply.len(), 1, "{reply:?}");
+    assert_eq!(reply[0].kind, kind::WAVEFORM_PREVIEW_REPLY);
+    reply[0].arguments.clone()
+}
+
+/// One pass of a player through the playlist: in from the folder menu,
+/// then `limit` rows a window until the end, each rendered row's id fed to
+/// a preview request and checked against the oracle for that position.
+fn page_playlist(db: &mut Database, served: &PlaylistServed, limit: u32, pass: usize) {
+    let total = u32::try_from(served.previews.len()).unwrap();
+    assert_eq!(open_menu(db, kind::PLAYLIST_MENU, &[CTX, 0, 0, 1]), 1);
+    let (_, lists) = render_page(db, 0, 1, 1);
+    assert_eq!(lists[0][1], Argument::Number(served.playlist));
+    assert_eq!(open_menu(db, kind::PLAYLIST_MENU, &[CTX, 0, served.playlist, 0]), total);
+    let mut seen = Vec::new();
+    let mut offset = 0;
+    while offset < total {
+        let (at, rows) = render_page(db, offset, limit, total);
+        let drawn = u32::try_from(rows.len()).unwrap();
+        // The last window is right-aligned to keep its size, so the header's
+        // offset, not the request's, says which rows these are.
+        let count = limit.min(total);
+        assert_eq!(
+            (at, drawn), (offset.min(total - count), count),
+            "pass {pass}: window for offset {offset}"
+        );
+        for (k, row) in rows.iter().enumerate() {
+            let position = at + u32::try_from(k).unwrap();
+            let (id, blob) = &served.previews[usize::try_from(position).unwrap()];
+            let Argument::Number(rendered) = row[1] else {
+                panic!()
+            };
+            assert_eq!(rendered, *id, "pass {pass}: the id at row {position}");
+            assert_eq!(
+                row[9],
+                Argument::Number(position + 1),
+                "pass {pass}: the playlist position at row {position}"
+            );
+            // What goes to `2004` is the id the row carried, not the oracle's.
+            assert_eq!(
+                preview_of(db, rendered),
+                preview_reply(blob),
+                "pass {pass}: the preview of row {position}"
+            );
+            seen.push(rendered);
+        }
+        offset += limit;
+    }
+    seen.sort_unstable();
+    seen.dedup();
+    let mut members: Vec<u32> = served.previews.iter().map(|(id, _)| *id).collect();
+    members.sort_unstable();
+    assert_eq!(seen, members, "pass {pass}: every member was rendered");
+}
+
+/// The player has gone back to the folder menu, replacing the playlist at
+/// this location, and now asks for the previews of the rows it just left:
+/// all at once, in reverse, without waiting. Each must be answered once,
+/// under its own transaction, with that row's bytes; the menu is untouched.
+fn late_previews_after_leaving(db: &mut Database, served: &PlaylistServed, base: u32) {
+    assert_eq!(open_menu(db, kind::PLAYLIST_MENU, &[CTX, 0, 0, 1]), 1);
+    // Transaction `base + k` asks for the member at `k`.
+    let transactions: Vec<u32> = (0..u32::try_from(served.previews.len()).unwrap())
+        .map(|k| base + k)
+        .collect();
+    for (transaction, (id, _)) in transactions.iter().zip(&served.previews).rev() {
+        db.send(&DbMessage::new(
+            *transaction,
+            kind::WAVEFORM_PREVIEW,
+            numbers(&[CTX, 0, *id, 0]),
+        ))
+        .unwrap();
+    }
+    let mut replies = Vec::new();
+    while replies.len() < served.previews.len() {
+        let batch = db.receive().unwrap();
+        assert!(!batch.is_empty(), "the session closed with previews outstanding");
+        replies.extend(batch);
+    }
+    // One reply under each transaction sent: the right count with one
+    // answered twice and another never is still a lost preview.
+    let mut answered: Vec<u32> = replies.iter().map(|reply| reply.transaction).collect();
+    answered.sort_unstable();
+    assert_eq!(answered, transactions, "{replies:?}");
+    for reply in replies {
+        let (id, blob) = &served.previews[usize::try_from(reply.transaction - base).unwrap()];
+        assert_eq!(reply.kind, kind::WAVEFORM_PREVIEW_REPLY, "late preview of {id}");
+        assert_eq!(reply.arguments, preview_reply(blob), "late preview of {id}");
+    }
+    let (_, lists) = render_page(db, 0, 1, 1);
+    assert_eq!(
+        lists[0][1],
+        Argument::Number(served.playlist),
+        "the folder menu is still what renders here"
+    );
+}
+
+/// #768: blank previews reported after browsing a playlist again and
+/// again. Over the wire, a preview depends only on the id a row carried
+/// and the track's `.DAT`, never on the menu that is open: this feeds the
+/// ids of successive rendered positions into `2004`, re-enters the
+/// playlist across menu replacement three times with two window sizes,
+/// lets a second player draw the same list through the shared caches in
+/// between, and asks late, pipelined previews for rows already left. The
+/// detail waveform (`2904`, `PWV3` from the `.EXT`) is a separate reply
+/// and is not asserted here.
+#[test]
+fn repeated_playlist_paging_feeds_each_rows_id_to_its_own_preview() {
+    let served = serve_playlist();
+    // Previews that could be mistaken for one another would prove nothing.
+    let mut blobs: Vec<&Vec<u8>> = served.previews.iter().map(|(_, blob)| blob).collect();
+    blobs.sort();
+    blobs.dedup();
+    assert_eq!(blobs.len(), served.previews.len(), "the fixture's previews differ");
+
+    let mut one = Database::connect(served.link.database_address(), 1).unwrap();
+    let mut two = Database::connect(served.link.database_address(), 2).unwrap();
+    let total = u32::try_from(served.previews.len()).unwrap();
+    for (pass, limit) in [2_u32, 3, 2].into_iter().enumerate() {
+        page_playlist(&mut one, &served, limit, pass);
+        // The other player draws the whole list between passes; the menus
+        // and parsed files it shares with player one must not cross over.
+        assert_eq!(open_menu(&mut two, kind::PLAYLIST_MENU, &[CTX, 0, served.playlist, 0]), total);
+        let (_, rows) = render_page(&mut two, 0, total, total);
+        assert_eq!(rows.len(), served.previews.len());
+        for (row, (id, blob)) in rows.iter().zip(&served.previews) {
+            let Argument::Number(rendered) = row[1] else {
+                panic!()
+            };
+            assert_eq!(rendered, *id, "pass {pass}: player two's row for {id}");
+            assert_eq!(
+                preview_of(&mut two, rendered),
+                preview_reply(blob),
+                "pass {pass}: player two's preview of {id}"
+            );
+        }
+        late_previews_after_leaving(
+            &mut one,
+            &served,
+            0x7680_0000 + u32::try_from(pass).unwrap() * 0x100,
+        );
+        // Player one has returned to the root. Player two can still render
+        // its existing playlist menu without opening it again.
+        let (_, still_open) = render_page(&mut two, 0, total, total);
+        assert_eq!(still_open, rows, "pass {pass}: player one's menu change leaked");
+    }
     served.link.stop();
 }
 
