@@ -1055,7 +1055,7 @@ as the stick, or a disposable stick named through `RBX_USB_STICK` /
 | `tests/on_stick.rs` | Library files that already live on the stick | `--test on_stick` |
 | `tests/legacy_rows.rs` | `export.pdb` row slots and folder positions that NXS-era players read (#182) | `--test legacy_rows` |
 | `tests/stick_flush.rs` | Every flush goes through `durable::flush` (#283) | `--test stick_flush` |
-| `tests/removable_media.rs` | Real FAT32, exFAT, HFS+ and journaled HFS+ disk images through `hdiutil`, each exported under the root the app chooses for it, including a sync to every volume at once. Skipped where `hdiutil` cannot attach an image. `RBX_REAL_USB=1` runs them on real sticks named `USB A` and `USB B` instead. | `--test removable_media` |
+| `tests/removable_media.rs` | Exports to mounted FAT32, exFAT, HFS+ and journaled HFS+ disk images, including a sync to every volume at once. The tests pass a captured destination identity to the export library via the same option used by the app. They cover stable identity across resyncs and refusal of an empty mount folder or a different volume at the same path (#778). `RBX_REAL_USB=1` uses disposable sticks named `USB A` and `USB B` for tests that use the shared volume list. The destination-replacement, large-cluster and dedicated HFS+ tests always use disk images. | `--test removable_media` |
 | `tests/device_library.rs` | Editing a stick's playlists | `--test device_library` |
 | `tests/pipeline.rs` | Analyse generated audio, author analysis, export, verify | `--test pipeline` |
 | `rbl-core` `durable` unit tests | Journal replay, retained generations, rollback, moves, set-aside, NFC/NFD, no exclusive rename | `RB_LITE_TEST=1 cargo test -p rbl-core` |
