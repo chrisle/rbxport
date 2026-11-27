@@ -811,10 +811,12 @@ mod tests {
         assert!(names.iter().all(|n| std::path::Path::new(n).extension() != Some("tmp".as_ref())), "{names:?}");
     }
 
+    const CLICK_WAV_RATE: u32 = 22_050;
+
     /// A mono 16-bit WAV of a click every `beat_secs`, loud enough for the
     /// tempo detector and long enough for a few hundred waveform columns.
     fn write_click_wav(path: &std::path::Path, seconds: u32, beat_secs: f32) {
-        let rate = 22_050_u32;
+        let rate = CLICK_WAV_RATE;
         let frames = rate * seconds;
         let mut data = Vec::with_capacity(frames as usize * 2);
         let period = (beat_secs * rate as f32) as u32;
@@ -879,6 +881,131 @@ mod tests {
         state.set_library(library, false, None, 0, location.clone());
         crate::backups::create(&state).unwrap();
         (state, location)
+    }
+
+    fn measure_click_playback(path: &std::path::Path, trim: f32) -> (f64, f64) {
+        use rbl_deck::{Deck, DeckEvent, Engine, EventSink, NullSink, Sink};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        const BLOCK: usize = 512;
+        const SETTLED_FRAME: u64 = 10_240;
+        const MEASURE_FRAMES: usize = 2_048;
+        let (sent, events) = std::sync::mpsc::channel();
+        let on_event: EventSink = Arc::new(move |event| { let _ = sent.send(event); });
+        let mut sink = None;
+        let engine = Engine::with_sink(|render| {
+            let opened = Arc::new(NullSink::new(CLICK_WAV_RATE, render));
+            sink = Some(Arc::clone(&opened));
+            Ok(opened as Arc<dyn Sink>)
+        }, &on_event).unwrap();
+        let sink = sink.unwrap();
+        engine.mixer().channels[0].set_trim(trim);
+        engine.master().set_gain(0.75);
+        engine.load(Deck::A, path);
+        let loaded = events.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(loaded, DeckEvent::Loaded { deck: Deck::A, .. }), "{loaded:?}");
+        engine.play(Deck::A);
+
+        // Let the mixer settle before measuring the same second click in each
+        // run. Pace the warmup so the decoder can top up the ring.
+        let position = || engine.snapshot().a.position_frames;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while position() < SETTLED_FRAME {
+            assert!(Instant::now() < deadline, "deck stalled at frame {}", position());
+            let remaining = usize::try_from(SETTLED_FRAME - position()).unwrap();
+            sink.pull(remaining.min(BLOCK));
+            std::thread::sleep(Duration::from_millis(8));
+        }
+        let samples = sink.pull(MEASURE_FRAMES);
+        assert_eq!(position(), SETTLED_FRAME + MEASURE_FRAMES as u64, "measurement must not underrun");
+        let power: f64 = samples.iter().map(|sample| f64::from(*sample).powi(2)).sum();
+        let peak = samples.iter().map(|sample| f64::from(sample.abs())).fold(0.0, f64::max);
+        ((power / samples.len() as f64).sqrt(), peak)
+    }
+
+    #[test]
+    fn reanalysis_can_shrink_the_browser_waveform_without_changing_mixed_playback() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location) = unanalysed_click_track(dir.path());
+        let editor = crate::grid::GridEditor::at(&dir.path().join("editor"));
+        let track = rbl_db::fixture::track_id(0);
+        let share = &location.share_root;
+        let settings = AnalysisSettings { key: false, ..AnalysisSettings::default() };
+        let analyse = |library: &rbl_index::Library| {
+            analyse_and_save(&state, library, share, &track, rbl_analysis::AnalysisPreset::Rbxport,
+                &settings, &editor, None).unwrap()
+        };
+
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        let mixer_schema = include_str!("../../crates/rbl-db/src/master_schema.sql").lines()
+            .find(|line| line.starts_with("CREATE TABLE `djmdMixerParam`")).unwrap();
+        db.connection().execute_batch(mixer_schema).unwrap();
+        let (gain_high, gain_low) = rbl_db::write::auto_gain::encode_auto_gain(-6.0).unwrap();
+        db.connection().execute(
+            "INSERT INTO djmdMixerParam (ID, ContentID, GainHigh, GainLow, PeakHigh, PeakLow, created_at, updated_at)
+             VALUES ('mixer', ?1, ?2, ?3, 16256, 0, 'fixture', 'fixture')",
+            rusqlite::params![track, gain_high, gain_low],
+        ).unwrap();
+        let assert_original_mixer = || {
+            let mut stmt = db.connection().prepare(
+                "SELECT m.ID, m.GainHigh, m.GainLow, m.PeakHigh, m.PeakLow FROM djmdMixerParam m
+                 JOIN djmdContent c ON c.ID = m.ContentID WHERE m.ContentID = ?1
+                 AND m.rb_local_deleted = 0 AND c.rb_local_deleted = 0 ORDER BY m.ID",
+            ).unwrap();
+            let rows = stmt.query_map([&track], |row| {
+                let id = row.get::<_, String>(0)?;
+                let levels = [row.get::<_, u16>(1)?, row.get(2)?, row.get(3)?, row.get(4)?];
+                Ok((id, levels))
+            }).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+            assert_eq!(rows, [("mixer".to_owned(), [gain_high, gain_low, 16256, 0])],
+                "the original mixer row must be the only live one, with its gain and peak intact");
+        };
+        let initial = analyse(&state.library().unwrap());
+        let (library, _) = rbl_index::load(&db).unwrap();
+        state.set_library(library, false, None, 0, location.clone());
+        let library = state.library().unwrap();
+        let audio = std::path::Path::new(library.audio_path_of(&track).unwrap());
+        let media = std::fs::read(audio).unwrap();
+        assert_original_mixer();
+
+        // Model a taller pre-existing Three Band preview by changing PWV6
+        // alone. The baseline is a generated fixture with a seeded preview.
+        let dat = rbl_anlz::resolve(share, &initial.analysis_path);
+        let overview = rbl_anlz::sibling(&dat, "2EX");
+        let browser_wave = || crate::commands::waveform_bytes(&state, &library, share, &track, "bands", None, None).unwrap();
+        let original_wave = browser_wave();
+        let mut existing = rbl_anlz::Anlz::read(&overview).unwrap();
+        let columns = &mut existing.sections.iter_mut()
+            .find(|section| section.tag == rbl_core::FourCc::new(b"PWV6")).unwrap().payload;
+        for value in columns {
+            *value = value.saturating_mul(2).min(127);
+        }
+        std::fs::write(&overview, existing.to_bytes()).unwrap();
+        let before_wave = browser_wave();
+        let before = measure_click_playback(audio, 0.5);
+
+        let result = analyse(&library);
+        let after_wave = browser_wave();
+        let after = measure_click_playback(audio, 0.5);
+        let trim_control = measure_click_playback(audio, 1.0);
+
+        assert_eq!(result.analysis_path, initial.analysis_path);
+        assert_original_mixer();
+        assert_eq!(std::fs::read(audio).unwrap(), media);
+        assert_eq!(before_wave.len(), after_wave.len());
+        assert_eq!(after_wave, original_wave, "analysis replaced the seeded preview");
+        assert!(after_wave.iter().any(|&sample| sample != 0));
+        assert!(before_wave.iter().zip(&after_wave).all(|(before, after)| before >= after));
+        assert_ne!(before_wave, after_wave, "the browser receives lower bands after reanalysis");
+        for (metric, (before, after, control)) in [
+            ("RMS", (before.0, after.0, trim_control.0)),
+            ("peak", (before.1, after.1, trim_control.1)),
+        ] {
+            eprintln!("{metric}: before={before:.8}, after={after:.8}, unity trim={control:.8}");
+            assert!(before > 0.001 && (after / before - 1.0).abs() < 1e-4, "{metric} changed after reanalysis");
+            assert!((control / before - 2.0).abs() < 0.02, "{metric} did not respond to doubled trim");
+        }
     }
 
     /// The index is re-read only once an analysis run is over. Until then a
