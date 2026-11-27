@@ -10,11 +10,11 @@ push a new tag from the commit you want to ship:
 
 ```sh
 git push origin triode
-git tag triode-v0.1.0
-git push origin refs/tags/triode-v0.1.0
+git tag triode-v1.10.0
+git push origin refs/tags/triode-v1.10.0
 ```
 
-Use a higher version on each release. The workflow uses the tag's version
+The initial Triode version matches `dev` at 1.10.0. Use a higher version on each subsequent Triode release. The workflow uses the tag's version
 for the installer and feed. Local development displays the version checked
 in to the branch. To set it, run `node scripts/sync-version.mjs --version VERSION`.
 
