@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { DeckWaveformFixture } from "./deck-waveform-fixture";
 
 const player = (page: Page) => page.getByRole("region", { name: "Preview player", exact: true });
 
@@ -84,8 +83,9 @@ test("a protected deck distinguishes missing analysis from a missing detail pale
     const tempo = row.querySelector('[data-col="bpm"]')?.textContent?.trim();
     return title && tempo !== undefined ? [{ title, analysed: tempo !== "" }] : [];
   }));
-  const unanalysed = examples.find(row => !row.analysed)!;
+  const unanalysed = examples.find(row => !row.analysed);
   const [complete, partial] = examples.filter(row => row.analysed);
+  if (!unanalysed || !complete || !partial) throw Error("Expected one unanalysed and two analysed fixture tracks");
   const load = async (title: string) => {
     await rows.getByRole("gridcell", { name: title, exact: true }).dblclick();
     await expect(player(page).getByTestId("player-title")).toHaveText(title);
@@ -95,19 +95,18 @@ test("a protected deck distinguishes missing analysis from a missing detail pale
     const pixels = canvas.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height).data;
     return pixels?.some((value, index) => index % 4 === 3 && value !== 0) ?? false;
   });
-  type WithFixture = Window & { deckWaveformFixture: DeckWaveformFixture };
-  const reads = () => page.evaluate(() => (window as WithFixture).deckWaveformFixture.detailReads);
+  const reads = () => page.evaluate(() => window.deckWaveformFixture.detailReads);
 
   await load(unanalysed.title);
   await expect(detail).toHaveCount(0);
   await load(complete.title);
   await expect.poll(painted).toBe(true);
 
-  await page.evaluate((title) => (window as WithFixture).deckWaveformFixture.omitPwv7(title), partial.title);
+  await page.evaluate((title) => window.deckWaveformFixture.omitPwv7(title), partial.title);
   await load(partial.title);
   await expect.poll(reads).toEqual(["bandsDetail"]);
   await expect.poll(() => drawnTo(page)).toBeGreaterThan(0);
-  await page.evaluate(() => (window as WithFixture).deckWaveformFixture.deliverMissingPwv7());
+  await page.evaluate(() => window.deckWaveformFixture.deliverMissingPwv7());
   expect(await painted(), "Three Band stays blank after the detail response settles").toBe(false);
   expect(await reads()).toEqual(["bandsDetail"]);
 
@@ -118,5 +117,5 @@ test("a protected deck distinguishes missing analysis from a missing detail pale
   await page.keyboard.press("Escape");
   await expect.poll(painted).toBe(true);
   expect(await reads()).toEqual(["bandsDetail", "colourDetail"]);
-  expect(await page.evaluate(() => (window as WithFixture).deckWaveformFixture.analysisCalls)).toBe(0);
+  expect(await page.evaluate(() => window.deckWaveformFixture.analysisCalls)).toBe(0);
 });

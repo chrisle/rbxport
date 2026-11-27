@@ -46,7 +46,7 @@ export async function installDeckWaveformFixture() {
     return rows;
   };
   backend.trackWaveform = (id, kind, ...rest) => {
-    if (id === affectedId && (kind === "bandsDetail" || kind === "colourDetail" || kind === "monoDetail" || kind === "detail")) {
+    if (id === affectedId && ["bandsDetail", "colourDetail", "monoDetail", "detail"].includes(kind)) {
       fixture.detailReads.push(kind);
       if (kind === "bandsDetail" && missing) return missing;
     }
@@ -64,3 +64,9 @@ export async function installDeckWaveformFixture() {
 }
 
 export type DeckWaveformFixture = Awaited<ReturnType<typeof installDeckWaveformFixture>>;
+
+declare global {
+  interface Window {
+    deckWaveformFixture: DeckWaveformFixture;
+  }
+}
