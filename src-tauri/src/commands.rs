@@ -2544,7 +2544,8 @@ fn media_failed(error: &std::io::Error) -> bool {
     // Real raw/source errno evidence above still takes precedence.
     if matches!(error.kind(), std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::NotFound
         | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
-        | std::io::ErrorKind::Unsupported | std::io::ErrorKind::StorageFull) {
+        | std::io::ErrorKind::Unsupported | std::io::ErrorKind::StorageFull
+        | std::io::ErrorKind::IsADirectory) {
         return false;
     }
     let text = error.to_string();
@@ -5521,17 +5522,43 @@ mod tests {
         #[cfg(windows)]
         let media_code = 1117;
         let root = tempfile::tempdir().unwrap();
+        let database = std::path::PathBuf::from("database");
+        durable::write(&root.path().join(&database), b"old database").unwrap();
         let path = std::path::PathBuf::from(format!("Track (os error {media_code})"));
-        std::fs::create_dir(root.path().join(&path)).unwrap();
+        let directory = root.path().join(&path);
+        std::fs::create_dir(&directory).unwrap();
+        durable::write(&directory.join("keep"), b"untouched").unwrap();
         let publication = Publication::new(root.path(), ".journal").unwrap();
+        durable::write(&publication.stage().join(&database), b"new database").unwrap();
         durable::write(&publication.stage().join(&path), b"test image").unwrap();
-        let cause = publication.commit_retained(&[path]).unwrap_err();
+        let cause = publication.commit_retained(&[database.clone(), path]).unwrap_err();
         assert!(cause.to_string().contains(&format!("Publication target is a directory: Track (os error {media_code})")));
+        assert!(Publication::validation_pending(root.path(), ".journal"));
+        assert_eq!(std::fs::read(root.path().join(&database)).unwrap(), b"new database");
+
+        publication.rollback().unwrap();
+        assert!(!root.path().join(".journal").exists());
+        assert_eq!(std::fs::read(root.path().join(&database)).unwrap(), b"old database");
+        assert_eq!(std::fs::read(directory.join("keep")).unwrap(), b"untouched");
+
+        // A successful rollback leaves the exporter returning the bare I/O error.
+        let failure = ExportError::from(cause);
+        assert_eq!(super::sync_error(&failure).message, failure.to_string());
+        let cause = match failure {
+            ExportError::Io(cause) => Some(cause),
+            _ => None,
+        }.expect("expected a bare publication I/O error");
+        assert_eq!(cause.kind(), std::io::ErrorKind::IsADirectory);
+
         let failure = ExportError::from(PublicationError::CommitRecoveryRequired {
             cause,
             rollback: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "could not write the rollback marker"),
         });
         assert_eq!(super::sync_error(&failure).message, failure.to_string());
+
+        let media = std::io::Error::from_raw_os_error(media_code);
+        let failure = ExportError::from(std::io::Error::new(std::io::ErrorKind::IsADirectory, media));
+        assert_eq!(super::sync_error(&failure).message, super::MEDIA_FAILED);
     }
 
     /// A track whose analysis folder is gone from disk is exported without

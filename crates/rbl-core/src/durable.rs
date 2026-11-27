@@ -1042,7 +1042,7 @@ impl Publication {
                     }
                     if target.try_exists()? {
                         if target.is_dir() {
-                            return Err(std::io::Error::other(format!(
+                            return Err(std::io::Error::new(std::io::ErrorKind::IsADirectory, format!(
                                 "Publication target is a directory: {}",
                                 entry.path.display()
                             )));
