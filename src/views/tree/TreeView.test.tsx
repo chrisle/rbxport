@@ -156,3 +156,34 @@ it("an Explorer directory imports its own node and greys the action without writ
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
   }
 });
+
+
+describe("TreeView scoped Sort Items", () => {
+  const folder: TreeNode = { id: "folder", name: "Folder", kind: "folder", depth: 0, childCount: 2 };
+  const child: TreeNode = { id: "child", name: "Child", kind: "playlist", depth: 1, childCount: 0 };
+
+  it("routes each browser command to its selected folder", () => {
+    const main = vi.fn();
+    const sub = vi.fn();
+    act(() => root.render(<>
+      <TreeView nodes={[folder, child]} selectedId={folder.id} onSelect={() => {}} onSortItems={main} />
+      <TreeView nodes={[folder, child]} selectedId={folder.id} onSelect={() => {}} onSortItems={sub} side="sub" />
+    </>));
+    act(() => { expect(runCommand("sortItems", { scope: "sub" })).toBe(true); });
+    expect(sub).toHaveBeenCalledExactlyOnceWith(folder, false);
+    expect(main).not.toHaveBeenCalled();
+    act(() => { expect(runCommand("sortItems", { scope: "main" })).toBe(true); });
+    expect(main).toHaveBeenCalledExactlyOnceWith(folder, false);
+    expect(runCommand("sortItems")).toBe(false);
+  });
+
+  it("does not sort a selected playlist or device folder", () => {
+    const sort = vi.fn();
+    for (const kind of ["playlist", "deviceFolder"] as const) {
+      const node = { ...folder, kind };
+      act(() => root.render(<TreeView nodes={[node]} selectedId={node.id} onSelect={() => {}} onSortItems={sort} side="sub" />));
+      act(() => { expect(runCommand("sortItems", { scope: "sub" })).toBe(false); });
+    }
+    expect(sort).not.toHaveBeenCalled();
+  });
+});

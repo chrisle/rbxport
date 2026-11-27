@@ -107,9 +107,9 @@ describe("menuBarEnabled", () => {
     expect(out["remove-from-collection"]).toBe(true);
   });
 
-  it("finds scoped Analyze Track and global Sort Items in the real registry", () => {
+  it("finds scoped Analyze Track and Sort Items in the real registry", () => {
     const releaseAnalyze = registerCommand("analyseSelection", () => true, "main");
-    const releaseSort = registerCommand("sortItems", () => true);
+    const releaseSort = registerCommand("sortItems", () => true, "main");
     const has = (action: Parameters<typeof hasCommand>[0], side?: Parameters<typeof hasCommand>[1]) =>
       side === undefined ? hasCommand(action) : hasCommand(action, side);
     try {
@@ -176,7 +176,7 @@ describe("menuBarEnabled", () => {
     expect(enabled(TREE, null, "smartPlaylist")).not.toContain("renumber-track-order");
   });
 
-  it("greys Sort Items for an empty folder and without its unscoped command", () => {
+  it("greys Sort Items for an empty folder and without its scoped command", () => {
     const input = {
       focus: TREE,
       lists: {},
@@ -185,13 +185,13 @@ describe("menuBarEnabled", () => {
     };
     expect(menuBarEnabled(input)["sort-items"]).toBe(false);
     input.trees.main.hasChildren = true;
-    expect(menuBarEnabled({ ...input, has: (action, side) => action !== "sortItems" || side !== undefined })["sort-items"])
+    expect(menuBarEnabled({ ...input, has: (action, side) => action !== "sortItems" || side === undefined })["sort-items"])
       .toBe(false);
     expect(menuBarEnabled(input)["sort-items"]).toBe(true);
     expect(menuBarEnabled({ ...input, focus: null })["sort-items"]).toBe(false);
     expect(menuBarEnabled({ ...input, focus: { pane: "tree", side: "sub" }, trees: { sub: input.trees.main } })["sort-items"])
-      .toBe(false);
-    expect(menuBarItem("sort-items")).toMatchObject({ action: "sortItems", owner: "tree", writes: true, scope: "global" });
+      .toBe(true);
+    expect(menuBarItem("sort-items")).toMatchObject({ action: "sortItems", owner: "tree", writes: true });
   });
 
   it("greys an item nothing on screen answers", () => {
