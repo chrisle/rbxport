@@ -4824,11 +4824,16 @@ pub async fn open_backup_directory<R: tauri::Runtime>(
 ) -> AppResult<()> {
     let path = state.backup_destination();
     blocking("open_backup_directory", move || {
+        // `internal` logs its argument and the webview shows it after the
+        // generic sentence, so the folder and the cause go in that one string.
+        // A later `with_detail` would replace the explanation with the bare
+        // error, leaving the log without the cause and the alert without the
+        // explanation.
         crate::durable::create_dir_all(&path).map_err(|e| {
-            AppError::internal("The backup folder could not be created.").with_detail(e.to_string())
+            AppError::internal(format!("The backup folder {} could not be created: {e}", path.display()))
         })?;
         app.opener().open_path(path.to_string_lossy().into_owned(), None::<&str>).map_err(|e| {
-            AppError::internal("The backup folder could not be opened.").with_detail(e.to_string())
+            AppError::internal(format!("The backup folder {} could not be opened: {e}", path.display()))
         })
     }).await
 }
@@ -5852,5 +5857,33 @@ mod tests {
 
         let files = expand_import_paths(&[dir.path().to_string_lossy().into_owned()]);
         assert_eq!(names(&files), ["real.mp3"]);
+    }
+
+    /// The Backups page shows one line for a folder that cannot be opened.
+    /// It names the folder and the cause; the explanation used to be
+    /// replaced by the bare I/O error on its way to the webview (#639).
+    #[test]
+    fn opening_an_unusable_backup_folder_names_the_folder_and_the_cause() {
+        use crate::state::AppState;
+        use tauri::Manager;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not a folder");
+        std::fs::write(&file, b"a file where the backup folder should be").unwrap();
+        let destination = file.join("backups");
+        let state_dir = dir.path().join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::write(state_dir.join(rbl_backup::DESTINATION_FILE), serde_json::to_vec(&destination).unwrap()).unwrap();
+        let state = std::sync::Arc::new(AppState::with_backups(state_dir));
+        assert_eq!(state.backup_destination(), destination);
+        let app = tauri::test::mock_app();
+        app.manage(state);
+
+        let error = tauri::async_runtime::block_on(super::open_backup_directory(app.handle().clone(), app.state())).unwrap_err();
+        let shown = error.full_message();
+        assert!(shown.starts_with("Something went wrong inside rbxport. The backup folder "), "{shown}");
+        assert!(shown.contains(&destination.display().to_string()), "{shown}");
+        assert!(shown.contains("could not be created: "), "{shown}");
+        assert!(shown.contains("os error"), "{shown}");
     }
 }

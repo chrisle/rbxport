@@ -186,8 +186,9 @@ VACUUM main INTO '<staging>/master.db'
 
 This writes one consistent, standalone copy of the database. The copy uses
 the same SQLCipher encryption and key as the original. The counts for
-`summary.json` are read from the live database right after the snapshot. The copy is then flushed to disk. See
-[Known issues](#known-issues) for a Windows bug in that flush.
+`summary.json` are read from the live database right after the snapshot. The copy is then flushed to disk through
+a handle opened for writing. See [Resolved issues](#resolved-issues) for the
+Windows bug that requires this.
 
 Why RBXport snapshots the database this way instead of copying the file is
 covered in [Database snapshot instead of a file copy](#database-snapshot-instead-of-a-file-copy).
@@ -495,17 +496,16 @@ for example if neither will start or a future version cannot read an old
 backup. They are kept simple and do not use the journal; a rollback folder
 holds the replaced files instead.
 
-## Known issues
+## Resolved issues
 
-- Windows: every backup fails with "Access is denied (os error 5)" at step 6.
-  The snapshot is opened read-only and then flushed, and Windows requires
-  write access to flush a file. See
-  [chrisle/rbxport#75](https://github.com/chrisle/rbxport/issues/75). The flush
-  is also redundant: the copy is compressed into a piece that is flushed
-  itself, then deleted.
-- A background backup that fails reports only "Something went wrong inside
-  rbxport." The cause is recorded in the log but not shown to the person.
-  The fix for #75 also addresses this.
+- Windows: before RBXport 1.2.0, every backup failed with "Access is denied
+  (os error 5)" at step 6. The snapshot was opened read-only and then
+  flushed, and Windows requires write access to flush a file. The flush now
+  opens the copy for writing (`backups.rs`, after the `VACUUM INTO`). See
+  [chrisle/rbxport#75](https://github.com/chrisle/rbxport/issues/75).
+- Before 1.2.0, a background backup that failed reported only "Something
+  went wrong inside rbxport." `failure_message` in `backups.rs` now appends
+  the cause, and the Backups screen shows it in its alert.
 
 ## Testing
 
