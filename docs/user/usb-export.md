@@ -104,6 +104,21 @@ rating import reads the old values as the same stars.
   updates when the library changes while the window is open; ticks on
   deleted playlists are removed.
 
+## Musical key notation on USB
+
+- **Preferences → View → Display Type → Key display format** controls how
+  RBXport displays keys and how new key analyses save them. Choose **Classic**
+  (`Ebm`) or **Alphanumeric** (`2A`). To change a track's stored key, edit its
+  Key field or run key analysis again. See [Analysis settings](analysis-settings.md).
+- **Preferences → DJ System → General → Key display format** sets the
+  default for USBs without a saved device setting.
+- For a USB that already has its own setting, select the USB under **Devices**
+  and choose **General → Key display format**. Sync preserves the setting saved
+  on that USB.
+
+Exports write each track's stored key to both Device Library and OneLibrary.
+The USB's display setting is stored separately from those track keys.
+
 ## Playlists on a stick
 
 Open a stick under **Devices** to see the libraries it holds, **Device
