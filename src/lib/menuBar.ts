@@ -54,8 +54,6 @@ export interface MenuBarItem {
   owner: "list" | "tree";
   /** Writes the library: refused, with the reason, while it is read-only. */
   writes: boolean;
-  /** App owns this command without a browser-side scope. */
-  scope?: "global";
   target?: string;
   browserSide?: BrowserSide;
 }
@@ -72,7 +70,7 @@ export const MENU_BAR_ITEMS: readonly MenuBarItem[] = [
   { id: "export-track", action: "exportTrack", owner: "list", writes: false },
   { id: "export-playlist", action: "exportPlaylist", owner: "tree", writes: false },
   { id: "show-in-finder", action: "showInFinder", owner: "list", writes: false },
-  { id: "sort-items", action: "sortItems", owner: "tree", writes: true, scope: "global" },
+  { id: "sort-items", action: "sortItems", owner: "tree", writes: true },
   { id: "renumber-track-order", action: "renumberTrackOrder", owner: "list", writes: true },
 ];
 
@@ -135,7 +133,7 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   const tree = focus !== null ? trees[side] : undefined;
   const live = (id: string, rule: boolean) => {
     const item = menuBarItem(id);
-    out[id] = rule && (item === null || has(item.action, item.scope === "global" ? undefined : side));
+    out[id] = rule && (item === null || has(item.action, side));
   };
 
   const n = list?.selected ?? 0;
@@ -184,7 +182,7 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   // Sort Items, 0x500d: the selected folder or Playlists heading with
   // children, as the tree context menu offers it. The shared command owns
   // the search refusal for every entry point.
-  live("sort-items", side === "main" && (kind === "folder" || kind === "collection") && tree?.hasChildren === true);
+  live("sort-items", (kind === "folder" || kind === "collection") && tree?.hasChildren === true);
   // Renumber Track Order, 0x500e: a playlist that is not intelligent, whose
   // list is the one that renumbers.
   live("renumber-track-order", kind === "playlist");

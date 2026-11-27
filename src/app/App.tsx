@@ -110,7 +110,7 @@ import { useNativeMenu } from "@/store/useNativeMenu";
 
 /** The commands the shell itself registers, and so the keys it runs. */
 const SHELL_COMMANDS: ReadonlySet<Action> = new Set<Action>([
-  "volumeUp", "volumeDown", "mute", "focusSearch", "clearSearch", "sortItems",
+  "volumeUp", "volumeDown", "mute", "focusSearch", "clearSearch",
 ]);
 
 /**
@@ -1847,23 +1847,6 @@ function AppBody() {
     },
     [tree, write, refuse, t, viewPrefs.locale, readOnly, explainEditLock],
   );
-  // Playlist › Sort Items (0x500d) from a key or the menu bar: the folder
-  // selected in the tree, as rekordbox's command acts on the tree's
-  // selection.
-  // rekordbox runs the menu-bar and key command through the same handler as
-  // the tree's menu (`TreeViewer::performCommand` @0x10157f264 ->
-  // `treeMessageSortItem`), so it refuses over a searched tree as well.
-  const treeSearching = useRef(false);
-  const setTreeSearching = useCallback((searching: boolean) => { treeSearching.current = searching; }, []);
-  useCommands({
-    sortItems: () => {
-      const node = selectedNode;
-      if (node?.kind !== "folder" && node?.kind !== "collection") return false;
-      sortItems(node, treeSearching.current);
-      return true;
-    },
-  });
-
   // Add To Shortcut: the rail takes the playlist as a button of its own.
   // rekordbox 7.2.11 takes the same playlist twice; a second button that
   // opens the same thing is nothing to a user, so this keeps one.
@@ -2532,12 +2515,11 @@ function AppBody() {
     }
     if (outcome.action === "bar-command" && outcome.item) {
       // Track and Playlist items use the same command as their other entry
-      // points. Sort Items is owned by App and has no browser-side scope.
+      // points, scoped to the tree or list on the focused browser side.
       const analyze = outcome.item.action === "analyseSelection";
       if (analyze && analysisDialogOpen()) return;
       if ((analyze || outcome.item.browserSide !== undefined) && !menuBarEnabled({ ...menuState, has: hasCommand })[outcome.item.id]) return;
-      runCommand(outcome.item.action, outcome.item.scope === "global"
-        ? undefined : { scope: outcome.item.browserSide ?? menuBarSide(menuState.focus), ...(outcome.item.target === undefined ? {} : { target: outcome.item.target }) });
+      runCommand(outcome.item.action, { scope: outcome.item.browserSide ?? menuBarSide(menuState.focus), ...(outcome.item.target === undefined ? {} : { target: outcome.item.target }) });
       return;
     }
     if (outcome.action === "sub") {
@@ -3554,7 +3536,6 @@ function AppBody() {
           onAddArtwork={addPlaylistArtwork}
           onAddToShortcut={addToShortcut}
           onSortItems={sortItems}
-          onSearchingChange={setTreeSearching}
           railShortcuts={railShortcuts}
           onOpenShortcut={openShortcut}
           onDeleteShortcut={deleteShortcut}
