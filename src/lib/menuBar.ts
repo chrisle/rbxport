@@ -30,6 +30,8 @@ export interface ListMenuState {
   rows: readonly { missing?: boolean }[];
   /** Some of the selection is files on disk that are not in the collection. */
   loose: boolean;
+  /** Authoritative selected master-row lock state; absent while pending. */
+  anyAnalysisLocked?: boolean;
   playlists?: readonly MenuTarget[] | undefined;
   devices?: readonly MenuTarget[] | undefined;
   busy?: boolean | undefined;
@@ -150,11 +152,10 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   // Analyze Track, 0x4000: a selected track that is not missing.
   // `analyseSelection` is the main browser's.
   out["analyze-track"] = tracks && side === "main" && anyPresent && has("analyseSelection");
-  // Analysis Lock On, 0x4012: as Analyze Track. Off, 0x4013: rekordbox wants
-  // a locked track among them; the list here does not carry the lock, so
-  // Off is live for any track, as the context menu's is.
+  // Analysis Lock Off needs a locked master row. Explorer preserves its
+  // independently established folder-browse fallback (stock 0x4013).
   live("analysis-lock-on", tracks && anyPresent);
-  live("analysis-lock-off", tracks);
+  live("analysis-lock-off", tracks && (list.source === "folder" || list.anyAnalysisLocked === true));
   out["analysis-lock"] = out["analysis-lock-on"] === true || out["analysis-lock-off"] === true;
   // Reload Tag, 0x4003: a present file, not in a history or the Tag List.
   live("reload-tag", tracks && list !== undefined && RELOAD_LISTS.has(list.source) && anyPresent);

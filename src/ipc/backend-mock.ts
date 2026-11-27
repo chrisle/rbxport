@@ -2413,6 +2413,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       });
       return wait(bytes);
     },
+    anyAnalysisLocked: (ids) => wait(ids.some(id => gridStore.get(gridSourceKey(id))?.locked === true)),
     gridState: (trackId, source) => {
       const held = gridOf(trackId, source);
       if (!held) return notFound("That track has no beat grid.");

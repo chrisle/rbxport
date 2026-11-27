@@ -656,6 +656,7 @@ pub fn run() {
             grid::grid_undo,
             grid::grid_redo,
             grid::grid_lock,
+            grid::any_analysis_locked,
             commands::track_phrases,
             commands::track_vocals,
             relocate::missing_tracks,

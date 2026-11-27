@@ -224,6 +224,7 @@ async function realBackend(): Promise<Backend> {
       if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
+    anyAnalysisLocked: (ids) => invoke<boolean>("any_analysis_locked", { tracks: [...ids] }),
     gridState: (trackId, deviceSource) => invoke<GridState>("grid_state", { track: trackId, deviceSource: deviceSource ?? null }),
     trackCues: (trackId, device) => device
       ? invoke<Cue[]>("device_track_cues", { track: trackId, path: device.path, format: device.format, deviceTrackId: device.trackId })

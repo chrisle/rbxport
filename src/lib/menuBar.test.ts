@@ -51,7 +51,7 @@ describe("menuBarEnabled", () => {
     // too; for a file that is there they are live [OBS static: 0x4003 and
     // 0x400d test `isValidMediaPath`].
     expect(enabled(LIST, { selected: 1, rows: [{ missing: false }] }, "allTracks")).toEqual([
-      "analysis-lock", "analysis-lock-off", "analysis-lock-on", "analyze-track",
+      "analysis-lock", "analysis-lock-on", "analyze-track",
       "create-folder", "create-intelligent-playlist", "create-playlist",
       "reload-tag", "remove-from-collection", "show-in-finder",
     ]);
@@ -60,10 +60,9 @@ describe("menuBarEnabled", () => {
   it("offers only removal and relocation for a missing track", () => {
     // rekordbox-track-menu-playlist-one-track.png and alphatheta-docs'
     // rekordbox-auto-relocate-win-track-menu.png. rekordbox greys Analysis
-    // Lock Off unless a selected track is locked; the rows here do not carry
-    // the lock, so Off stays live, as the context menu's does.
+    // Lock Off unless a selected master track is known to be locked.
     expect(enabled(LIST, { selected: 1, rows: [{ missing: true }] }, "allTracks")).toEqual([
-      "analysis-lock", "analysis-lock-off", "auto-relocate",
+      "auto-relocate",
       "create-folder", "create-intelligent-playlist", "create-playlist",
       "relocate", "remove-from-collection",
     ]);
@@ -277,4 +276,14 @@ it("retires same-number destinations when the same browser changes device librar
   expect(second["add-to-playlist"]?.[0]?.id).not.toBe(oldToken);
   expect(menuBarItem(`add-to-playlist:${oldToken}`)).toBeNull();
   expect(menuBarItem(`add-to-playlist:${second["add-to-playlist"]?.[0]?.id}`)).toMatchObject({ target: "7", browserSide: "main" });
+});
+
+
+it("enables native Off only for a known selected master lock, including a missing locked file", () => {
+  for (const missing of [false, true]) {
+    expect(enabled(LIST, { selected: 1, rows: [{ missing }], anyAnalysisLocked: true }, "allTracks")).toContain("analysis-lock-off");
+    expect(enabled(LIST, { selected: 1, rows: [{ missing }], anyAnalysisLocked: false }, "allTracks")).not.toContain("analysis-lock-off");
+  }
+  expect(enabled(LIST, { source: "device", selected: 1, anyAnalysisLocked: true }, "allTracks")).not.toContain("analysis-lock-off");
+  expect(enabled(LIST, { source: "folder", selected: 1, rows: [{}] }, "allTracks")).toContain("analysis-lock-off");
 });

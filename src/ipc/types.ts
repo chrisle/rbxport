@@ -453,6 +453,8 @@ export interface Backend {
    * whether there is anything to undo or redo, and whether it is locked.
    * Rejects as `notFound` for a track with no grid.
    */
+  /** Lock metadata for selected master IDs; one read transaction, no analysis-file read. */
+  anyAnalysisLocked(ids: readonly string[]): Promise<boolean>;
   gridState(trackId: string, deviceSource?: DeviceTrackSource): Promise<GridState>;
 
   /** A track's cue points, ordered by position. */

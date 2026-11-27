@@ -1010,6 +1010,47 @@ pub async fn grid_redo<R: tauri::Runtime>(
     run(app, state, player, editor, "grid_redo", track, GridAction::Redo, deck, GridOptions { device_source, ..GridOptions::default() }).await
 }
 
+/// Read only the lock metadata needed by the native Track menu.
+#[tauri::command]
+pub async fn any_analysis_locked(
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+) -> AppResult<bool> {
+    if tracks.is_empty() { return Ok(false); }
+    if !valid_lock_selection(&tracks, state.library()?.len()) {
+        return Err(AppError::new(ErrorKind::Malformed, "Invalid analysis-lock selection."));
+    }
+    let state = Arc::clone(&state);
+    blocking("any_analysis_locked", move || {
+        state.read_db(|db| selected_analysis_locked(db.connection(), &tracks)).map_err(write_error)
+    }).await
+}
+
+// Selection IDs are the index's decimal u64 master IDs, never device/file IDs.
+// Bound by the loaded library rather than an arbitrary transport row cap.
+fn valid_lock_selection(tracks: &[String], master_rows: usize) -> bool {
+    tracks.len() <= master_rows && tracks.iter().all(|id| {
+        !id.is_empty() && id.len() <= 20
+            && id.bytes().all(|byte| byte.is_ascii_digit())
+            && id.parse::<u64>().is_ok()
+    })
+}
+
+fn selected_analysis_locked(db: &rusqlite::Connection, tracks: &[String]) -> Result<bool, rbl_db::DbError> {
+    if tracks.is_empty() { return Ok(false); }
+    // A single read transaction keeps every chunk on the same committed view.
+    let transaction = db.unchecked_transaction()?;
+    let mut locked = false;
+    for chunk in tracks.chunks(512) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!("SELECT EXISTS(SELECT 1 FROM djmdContent WHERE rb_local_deleted=0 AND (COALESCE(Analysed,0)&128)!=0 AND ID IN ({placeholders}))");
+        locked = transaction.query_row(&sql, rusqlite::params_from_iter(chunk), |row| row.get(0))?;
+        if locked { break; }
+    }
+    transaction.commit()?;
+    Ok(locked)
+}
+
 /// Locks or unlocks a track's grid. Nothing in the library changes: see the
 /// module docs for where the lock lives.
 #[tauri::command]
@@ -1046,6 +1087,27 @@ mod tests {
     // Every test builds its own library and share tree in a tempdir, the way
     // the cue tests do; `RBXPORT_TEST` cannot reach a fixture.
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+
+    #[test]
+    fn native_menu_lock_metadata_reads_only_live_selected_master_rows() {
+        assert!(super::valid_lock_selection(&[u64::MAX.to_string()], 1));
+        assert!(!super::valid_lock_selection(&["1".into(), "2".into()], 1));
+        for invalid in ["file:/owned/a.wav", "-1", "+1", "18446744073709551616", ""] {
+            assert!(!super::valid_lock_selection(&[invalid.into()], 1));
+        }
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE djmdContent(ID TEXT, Analysed INTEGER, rb_local_deleted INTEGER); INSERT INTO djmdContent VALUES('1',105,0),('2',233,0),('3',128,1),('4',64,0),('5',NULL,0);").unwrap();
+        for ids in [vec![], vec!["1", "3", "4", "5"], vec!["999"]] {
+            assert!(!super::selected_analysis_locked(&db, &ids.into_iter().map(str::to_owned).collect::<Vec<_>>()).unwrap());
+        }
+        assert!(super::selected_analysis_locked(&db, &["1".into(), "2".into()]).unwrap());
+        db.execute("UPDATE djmdContent SET Analysed=Analysed&127 WHERE ID='2'", []).unwrap();
+        assert!(!super::selected_analysis_locked(&db, &["2".into()]).unwrap());
+        db.execute("INSERT INTO djmdContent VALUES('600',128,0)", []).unwrap();
+        let across_chunks: Vec<_> = (1..=600).map(|id| id.to_string()).collect();
+        assert!(super::selected_analysis_locked(&db, &across_chunks).unwrap());
+    }
+
 
     use super::*;
     use rbl_anlz::AnlzBuilder;

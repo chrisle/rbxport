@@ -1,3 +1,4 @@
+import { useAnalysisLockSelection } from "@/store/useAnalysisLockSelection";
 import type { LoadedTrack } from "@/ipc/types";
 /**
  * The track browser.
@@ -2064,6 +2065,8 @@ export const TrackTable = memo(function TrackTable({
       return true;
     },
   }, listScope);
+  const anyAnalysisLocked = useAnalysisLockSelection(selection.ids, view.token,
+    spec.source.kind !== "device" && spec.source.kind !== "folder" && !view.swapping && !view.loading);
   // What the native Track menu needs to grey its items, kept current.
   useEffect(() => {
     if (spec.source.kind === "device") {
@@ -2075,9 +2078,9 @@ export const TrackTable = memo(function TrackTable({
       source: spec.source.kind,
       selected: selection.ids.size,
       rows,
-      loose: hasLooseId(selection.ids), playlists, devices,
+      loose: hasLooseId(selection.ids), playlists, devices, anyAnalysisLocked,
     });
-  }, [listScope, spec.source.kind, selection.ids, view.token, selectedRows, playlists, devices, deviceMenu]);
+  }, [listScope, spec.source.kind, selection.ids, view.token, selectedRows, playlists, devices, deviceMenu, anyAnalysisLocked]);
   useEffect(() => () => publishListMenuState(listScope, null), [listScope]);
 
   // Whether the Delete key speaks to this list: rekordbox's list hears it
