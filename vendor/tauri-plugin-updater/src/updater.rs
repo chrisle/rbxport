@@ -1343,7 +1343,8 @@ impl Update {
                 "do shell script {} with administrator privileges",
                 applescript_string(&privileged_install_command(
                     &self.extract_path,
-                    tmp_extract_dir.path()
+                    tmp_extract_dir.path(),
+                    &backup,
                 ))
             );
 
@@ -1361,12 +1362,27 @@ impl Update {
                 .map_err(|e| e.to_string())
                 .and_then(|()| rx.recv().map_err(|e| e.to_string())?);
 
-            if result.is_err() {
+            if let Err(error) = result {
+                log::error!("Privileged app installation failed: {error}");
                 std::fs::remove_dir_all(tmp_extract_dir.path()).ok();
-                return Err(Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "Failed to move the new app into place",
-                )));
+                return Err(failed_install(
+                    tmp_backup_dir,
+                    &backup,
+                    std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Failed to move the new app into place",
+                    ),
+                ));
+            }
+            // The elevated helper removes its old bundle only after successful
+            // placement. A cleanup refusal must not turn that success into an
+            // install error or let unprivileged TempDir cleanup hide the copy.
+            if backup_may_remain(&backup) {
+                let _ = tmp_backup_dir.keep();
+                log::warn!(
+                    "Update installed; previous app backup retained at {}",
+                    backup.display()
+                );
             }
         }
 
@@ -1474,18 +1490,34 @@ fn failed_install(backup_dir: tempfile::TempDir, backup: &Path, error: std::io::
     }
 }
 
-/// The existing privileged install, with every path kept as one shell word.
+/// Use the system JavaScript bridge for exact-destination native renames.
+/// `mv` can instead nest the bundle in a destination directory that appeared
+/// after the previous bundle was moved aside. Keep every path one shell word.
 #[cfg(target_os = "macos")]
-fn privileged_install_command(target: &Path, staged: &Path) -> String {
-    let target = sh_quote(target);
-    let staged = sh_quote(staged);
-    format!("rm -rf {target} && mv -f {staged} {target}")
+fn privileged_install_command(target: &Path, staged: &Path, backup: &Path) -> String {
+    privileged_install_command_with_script(target, staged, backup, include_str!("macos_install.js"))
 }
 
-/// Quotes `path` as a single `sh` word, whatever characters it holds.
 #[cfg(target_os = "macos")]
-fn sh_quote(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
+fn privileged_install_command_with_script(
+    target: &Path,
+    staged: &Path,
+    backup: &Path,
+    script: &str,
+) -> String {
+    format!(
+        "/usr/bin/osascript -l JavaScript -e {} -- {} {} {}",
+        sh_quote(script),
+        sh_quote(&target.to_string_lossy()),
+        sh_quote(&staged.to_string_lossy()),
+        sh_quote(&backup.to_string_lossy()),
+    )
+}
+
+/// Quotes text as a single `sh` word, whatever characters it holds.
+#[cfg(target_os = "macos")]
+fn sh_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 /// Quotes `s` as an AppleScript string literal.
@@ -1941,41 +1973,115 @@ mod mac_placement_tests {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    fn run_privileged_command(
+        target: &std::path::Path,
+        staged: &std::path::Path,
+        backup: &std::path::Path,
+    ) -> std::process::Output {
+        // Run only the inner shell payload as this user. Never authorize,
+        // install an application, or restart; all paths are generated dirs.
+        std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(super::privileged_install_command(target, staged, backup))
+            .output()
+            .unwrap()
+    }
+
     #[test]
     #[cfg(target_os = "macos")]
-    fn privileged_install_keeps_benign_paths_as_single_arguments() {
-        // Intercept both commands: this test never removes or moves a file,
-        // installs an app, or requests administrator privileges.
-        let intercept = "rm() { printf '%s\\0' rm \"$@\"; }; mv() { printf '%s\\0' mv \"$@\"; }; ";
-        let dir = std::env::temp_dir().join(format!("updater-path-fixture-{}", std::process::id()));
-        for name in ["Applications", "DJ Apps", "Chris's Mixes"] {
-            let target = dir.join(name).join("Mix.app");
-            let staged = dir.join("New Mix.app");
-            let command = super::privileged_install_command(&target, &staged);
-            let output = std::process::Command::new("/bin/sh")
-                .arg("-c")
-                .arg(format!("{intercept}{command}"))
-                .output()
-                .unwrap();
-            assert!(output.status.success());
-            let arguments: Vec<_> = output
-                .stdout
-                .split(|byte| *byte == 0)
-                .filter(|argument| !argument.is_empty())
-                .collect();
-            assert_eq!(
-                arguments,
-                [
-                    b"rm".as_slice(),
-                    b"-rf",
-                    target.as_os_str().as_encoded_bytes(),
-                    b"mv",
-                    b"-f",
-                    staged.as_os_str().as_encoded_bytes(),
-                    target.as_os_str().as_encoded_bytes()
-                ]
+    fn privileged_install_replaces_generated_directories_with_literal_paths() {
+        for name in ["Applications", "DJ Apps", "Chris's \"Mix\" – 音楽"] {
+            let root = tempfile::tempdir().unwrap();
+            let target = root.path().join(name);
+            let staged = root.path().join("New Mix");
+            let backup = root.path().join("Previous Mix");
+            std::fs::create_dir(&target).unwrap();
+            std::fs::create_dir(&staged).unwrap();
+            std::fs::write(target.join("marker"), b"old").unwrap();
+            std::fs::write(staged.join("marker"), b"new").unwrap();
+            let output = run_privileged_command(&target, &staged, &backup);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
             );
+            assert_eq!(std::fs::read(target.join("marker")).unwrap(), b"new");
+            assert!(!backup.exists());
+            assert!(!staged.exists());
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn privileged_install_missing_stage_restores_previous_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("Current Mix");
+        let staged = root.path().join("Missing Mix");
+        let backup_dir = tempfile::tempdir_in(root.path()).unwrap();
+        let backup = backup_dir.path().join("previous");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("marker"), b"old").unwrap();
+        let output = run_privileged_command(&target, &staged, &backup);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("previous app restored"));
+        assert_eq!(std::fs::read(target.join("marker")).unwrap(), b"old");
+        assert!(!backup.exists());
+        let error = super::failed_install(
+            backup_dir,
+            &backup,
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Failed to move the new app into place",
+            ),
+        );
+        assert!(matches!(error, crate::Error::Io(_)));
+        assert_eq!(std::fs::read(target.join("marker")).unwrap(), b"old");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn privileged_install_refuses_occupied_destination_and_retains_backup() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("Current Mix");
+        let staged = root.path().join("New Mix");
+        let backup_dir = tempfile::tempdir_in(root.path()).unwrap();
+        let backup = backup_dir.path().join("previous");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::create_dir(&staged).unwrap();
+        std::fs::write(target.join("marker"), b"old").unwrap();
+        std::fs::write(staged.join("marker"), b"new").unwrap();
+        // Deterministically model another directory appearing after backup.
+        // Both placement and restore must refuse it, without mv-style nesting.
+        let script = include_str!("macos_install.js").replace(
+            "var placement = move(staged, target);",
+            "ObjC.bindFunction('mkdir', ['int', ['char *', 'unsigned int']]); if ($.mkdir(target, 448) !== 0) throw new Error('fixture mkdir failed'); var placement = move(staged, target);",
+        );
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(super::privileged_install_command_with_script(
+                &target, &staged, &backup, &script,
+            ))
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("previous app retained"));
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
+        assert_eq!(std::fs::read(staged.join("marker")).unwrap(), b"new");
+        let error = super::failed_install(
+            backup_dir,
+            &backup,
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Failed to move the new app into place",
+            ),
+        );
+        let crate::Error::PreviousAppNotRestored { backup: kept, .. } = error else {
+            panic!("the backup must survive TempDir cleanup");
+        };
+        assert_eq!(kept, backup);
+        assert_eq!(std::fs::read(kept.join("marker")).unwrap(), b"old");
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
     }
 
     #[test]

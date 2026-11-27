@@ -14,7 +14,7 @@ These changes derive from official upstream commit
 `2a9c29e004325db674fd904089749c38f4aac824` (included in updater 2.13.2).
 A separate placement correction follows the same-filesystem staging and
 backup/install/restore design in the official 2.13.2 implementation, without
-its APFS atomic-swap/JXA path or a new dependency. Both temporary directories
+its APFS atomic-swap path or a new dependency. Both temporary directories
 are allocated on the install path's filesystem before moving the old bundle.
 The unprivileged replacement is transactional: a failed placement restores
 the old bundle; if restore also fails, its owned backup directory is retained
@@ -23,13 +23,25 @@ created a target meanwhile. The first backup move is distinguished from the
 later placement move: only a permission refusal of the first can enter the
 historical authorization fallback. A restored placement refusal cannot.
 
-The protected-directory command and its checked AppleScript dispatch remain
-byte-for-byte the reviewed quoting backport. Its original destructive move
-sequence is outside this repair: no privileged rollback guarantee is added
-or claimed. A fuller exact-destination privileged transaction requires its
-own compatible implementation and review.
+The protected-directory route retains the same checked AppleScript authorization
+and dispatch boundary. Its shell command invokes the system JavaScript bridge
+with only the target, staged bundle and reserved backup paths. Native macOS
+`renamex_np(RENAME_EXCL)` moves the old bundle aside, places the new one, and
+restores the old bundle if placement fails. Exclusive destination semantics
+refuse an existing directory or symlink instead of nesting into it. If restore
+also fails, the existing error exposes and retains the backup. Failure details
+from authorization or the payload are logged. Only after successful placement
+does the authorized helper remove the old backup. A cleanup refusal keeps the
+installation successful and retains/logs the backup path. This is not a durable
+crash-recovery protocol, and arbitrary process termination can leave a retained
+backup requiring manual recovery.
 
-This does not claim a real installer/restart test or the original #457 cause.
+A disposable macOS 15.7.7 arm64 guest exercised the protected path with
+ad hoc-signed RBXport builds and a signed local update feed. Canceling the
+administrator prompt preserved the old executable. Authorizing a retry
+replaced the bundle in place, and Restart Now reopened the new version.
+The original #457 install route and failure cause remain unverified.
+
 A protected non-system-volume parent that cannot allocate staging safely
 refuses before touching the original; it does not fall back to a cross-volume
 copy. The standard protected Applications layout still stages in system temp
@@ -48,9 +60,11 @@ The macOS quoting and generated-directory transaction tests run through:
 cargo test -p tauri-plugin-updater --lib
 ```
 
-The existing quoting tests replace `rm` and `mv` with logging functions; transaction
-tests move only generated generic directories. They do not install an
-application, request administrator privileges or restart. The ignored
+The protected-command tests execute the exact inner shell/JavaScript payload as
+the current user against generated generic directories, including literal
+punctuation/Unicode paths, missing replacement and an injected destination
+appearance. Ordinary transaction tests also use generated directories. They do
+not install an application, request administrator privileges or restart. The ignored
 cross-filesystem fixture requires an explicit disposable root on a different
 filesystem from system temp:
 
