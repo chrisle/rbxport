@@ -111,19 +111,21 @@ their own entry points. Do not infer a physical pass from emulator audio.
 
 ## Real USB sticks
 
-The removable-media tests run on FAT32, exFAT and HFS+ disk images by
-default. To run them on real sticks instead, name two disposable sticks
-`USB A` and `USB B`, put an empty `.rbxport-disposable` file at the root of
-each, and run:
+The removable-media tests use FAT32, exFAT, HFS+ and journaled HFS+ disk
+images by default. Tests that use the shared volume list can use two
+disposable sticks named `USB A` and `USB B`. Put an empty
+`.rbxport-disposable` file at the root of each, then run the command below.
+The destination-replacement, large-cluster and dedicated HFS+ tests still
+use disk images.
 
 ```sh
 RBX_REAL_USB=1 RB_LITE_TEST=1 cargo test -p rbl-export --test removable_media
 ```
 
 The marker says the stick may be overwritten; without it the tests refuse to
-write. Before each test, `PIONEER`, `.PIONEER`, `Contents`, the tests' own
-folders and rbxport's working files are deleted from both sticks; nothing
-else on them is touched. The tests take the sticks one at a time, and one of
+write. Before each test that uses the sticks, `PIONEER`, `.PIONEER`,
+`Contents`, the tests' own folders and rbxport's working files are deleted
+from both sticks. The tests take the sticks one at a time, and one of
 them syncs both at once as the Sync Manager does. What the last test leaves
 need not be a library a player can read; for one at each stick's root, run
 that test on its own. Its tracks are placeholder bytes, so a player can browse

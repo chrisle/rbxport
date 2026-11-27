@@ -12,17 +12,18 @@
 //! HFS+ volume [OBS: see `docs/reference/usb-export-db.md`, Root selection],
 //! so each volume exports under the root the app would choose for it.
 //!
-//! By default every test runs on disk images, one per format, and skips a
-//! format where `hdiutil` cannot create or attach its image.
+//! By default the shared volume list uses one disk image per format. It
+//! skips a format where `hdiutil` cannot create or attach its image.
 //!
-//! With `RBX_REAL_USB=1`, every test runs on the real sticks mounted as
-//! `/Volumes/USB A` and `/Volumes/USB B` instead, one test at a time. Each
-//! stick must hold a `.rbxport-disposable` file at its root, which says what
-//! rbxport and rekordbox keep on it may be deleted; without it the tests
-//! refuse to write. Before each test, `PIONEER`, `.PIONEER`, `Contents`, the
-//! tests' own folders and rbxport's working files are deleted from the
-//! stick. What the last test leaves need not be a library a player can read;
-//! run `a_sync_writes_every_stick_at_once` on its own for one at each stick's
+//! With `RBX_REAL_USB=1`, tests that use the shared volume list run on the
+//! sticks mounted as `/Volumes/USB A` and `/Volumes/USB B`, one test at a
+//! time. The destination-replacement, large-cluster and dedicated HFS+ tests
+//! always use disk images.
+//! Each stick must hold a `.rbxport-disposable` file at its root to allow
+//! deletion of rbxport and rekordbox data. Before each test on a stick,
+//! `PIONEER`, `.PIONEER`, `Contents`, the tests' own folders, and rbxport's
+//! working files are deleted. For a browsable library, run
+//! `a_sync_writes_every_stick_at_once` on its own. It exports to each stick's
 //! root. Its tracks are placeholder bytes, so a player can browse them but
 //! not play them.
 #![cfg(target_os = "macos")]
@@ -32,6 +33,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use rbl_core::durable::VolumeIdentity;
 use rbl_export::cache::PreparationCache;
 use rbl_export::{
     export_with_options, verify, ExportOptions, ExportReport, ExportRoot, SourcePlaylist, SourceTrack, SyncNode,
@@ -144,6 +146,26 @@ impl Volume {
         let options = ExportOptions { sync: Some(&sync), root: self.root, cache, ..Default::default() };
         export_with_options(destination, tracks, playlists, &[], &options, &mut |_| {})
             .unwrap_or_else(|e| panic!("{}: {e}", self.label))
+    }
+
+    /// [`Self::export`] through the app's destination guard. `identity` is
+    /// what `reserve_export` captures on the mount root before any work
+    /// (`src-tauri/src/commands.rs`), handed down as
+    /// `ExportOptions::expected_volume`; the export checks it before its
+    /// first write, again after opening the publication, and the publication
+    /// checks the same root at every track. Returns the error rather than
+    /// panicking, so a refusal can be asserted.
+    fn export_guarded(
+        &self,
+        destination: &Path,
+        tracks: &[SourceTrack],
+        playlists: &[SourcePlaylist],
+        identity: &VolumeIdentity,
+    ) -> rbl_export::Result<ExportReport> {
+        let tree = playlists.iter().map(|p| SyncNode { id: p.id, parent: 0, attribute: 0 }).collect();
+        let sync = SyncSource { db_id: 123, tree, automatic: false, cloud_db_id: 0 };
+        let options = ExportOptions { sync: Some(&sync), root: self.root, expected_volume: Some(identity), ..Default::default() };
+        export_with_options(destination, tracks, playlists, &[], &options, &mut |_| {})
     }
 }
 
@@ -587,4 +609,159 @@ fn a_read_only_hfs_plus_stick_is_refused_up_front_with_the_reason() {
     assert!(error.to_string().contains("Read-only file system"), "{error}");
     let after = verify(&volume.mount).unwrap();
     assert_eq!((after.tracks, after.is_ok()), (before.tracks, true));
+}
+
+/// The app's destination guard on a stick that stays where it is (#778,
+/// #708: syncs refused with "The destination changed since export started"
+/// on sticks nobody had touched). The tests above export without the guard,
+/// so they cannot show that the identity `reserve_export` captures on the
+/// mount root still matches what the export reopens at each of its checks.
+/// Here one identity passes a first export, a no-op resync and a resync that
+/// removes a track on every format, FAT32 and exFAT included.
+#[test]
+fn the_destination_guard_passes_a_stick_that_stays_put_through_an_export_and_its_resyncs() {
+    for volume in &volumes() {
+        let name = &volume.label;
+        let root = &volume.mount;
+        let src = tempfile::tempdir().unwrap();
+        let tracks = tracks(src.path());
+        let every = |tracks: &[SourceTrack]| vec![playlist(10, "Set", (0..tracks.len()).collect())];
+        let identity = VolumeIdentity::capture(root).unwrap_or_else(|e| panic!("{name}: {e}"));
+
+        let first = volume.export_guarded(root, &tracks, &every(&tracks), &identity).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(first.tracks, 3, "{name}");
+        let again = volume.export_guarded(root, &tracks, &every(&tracks), &identity).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!((again.up_to_date, again.reused), (true, 3), "{name}");
+        let fewer = volume.export_guarded(root, &tracks[1..], &every(&tracks[1..]), &identity).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(fewer.removed, 1, "{name}");
+
+        identity.check(root).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let check = verify(root).unwrap();
+        assert!(check.is_ok(), "{name}: {:?}", check.errors);
+        assert_eq!(check.tracks, 2, "{name}");
+        assert!(leftovers(root).is_empty(), "{name}: {:?}", leftovers(root));
+    }
+}
+
+/// Detaches whatever is attached at `mount`, as pulling the stick does, while
+/// this process still holds a handle on its root.
+fn detach(mount: &Path) {
+    let status = Command::new("hdiutil").args(["detach", "-quiet", "-force"]).arg(mount).status().unwrap();
+    assert!(status.success(), "could not detach {}", mount.display());
+}
+
+/// A second blank image in `format`, attached but not mounted. It takes its
+/// device while the first image is still attached, because macOS hands a
+/// detached device's number to the next one attached and the guard compares
+/// device and inode; a replacement that reused the number would be a
+/// different question. Detached on drop.
+struct Unmounted {
+    device: String,
+    _image: tempfile::TempDir,
+}
+
+fn unmounted(format: &str) -> Option<Unmounted> {
+    let dir = tempfile::tempdir().ok()?;
+    let image = dir.path().join("other.dmg");
+    let run = |command: &mut Command| command.output().ok().filter(|o| o.status.success());
+    run(Command::new("hdiutil").args(["create", "-quiet", "-size", "64m", "-fs", format, "-volname", "RBXTEST", "-o"]).arg(&image))?;
+    let attached = run(Command::new("hdiutil").args(["attach", "-nomount"]).arg(&image))?;
+    // One line per device; the filesystem is on the last one, whether the
+    // image has a partition map (`/dev/diskNs1`) or not (`/dev/diskN`).
+    let listing = String::from_utf8_lossy(&attached.stdout);
+    let device = listing.lines().rev().find_map(|line| line.split_whitespace().next())?.to_owned();
+    Some(Unmounted { device, _image: dir })
+}
+
+impl Drop for Unmounted {
+    fn drop(&mut self) {
+        let _ = Command::new("hdiutil").args(["detach", "-quiet", "-force", &self.device]).status();
+    }
+}
+
+/// The guard's positive control on real volume mounts, in the order a
+/// replaced stick goes through. The image the identity was captured on is
+/// detached, which leaves its mount path a plain folder on the boot volume;
+/// then another image of the same format is mounted at that path. Both are
+/// refused before anything is written, and the refusal names both identities
+/// from the compared handles (#806, #1008). A fresh capture on the
+/// replacement passes, as a new reservation would. Images only, whatever
+/// `RBX_REAL_USB` says: no real stick can be swapped under a test.
+#[test]
+fn another_volume_at_the_same_mount_path_is_refused_before_any_write() {
+    use std::os::unix::fs::MetadataExt;
+
+    let identity_label = |path: &Path| {
+        let metadata = std::fs::metadata(path).unwrap();
+        format!("dev {} ino {}", metadata.dev(), metadata.ino())
+    };
+    for format in IMAGE_FORMATS {
+        let Some(volume) = Volume::image(format) else {
+            eprintln!("skipping {format}: hdiutil could not create or attach an image here");
+            continue;
+        };
+        let Some(other) = unmounted(format) else {
+            eprintln!("skipping {format}: hdiutil could not create or attach a second image here");
+            continue;
+        };
+        let name = &volume.label;
+        let mount = &volume.mount;
+        let kind = mounted_type(mount);
+        let src = tempfile::tempdir().unwrap();
+        let tracks = tracks(src.path());
+        let set = [playlist(10, "Set", (0..tracks.len()).collect())];
+        let original_label = identity_label(mount);
+        let identity = VolumeIdentity::capture(mount).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let expected_refusal = |current| {
+            format!("The destination changed since export started (at start: {original_label}; now: {current})")
+        };
+        let report = volume.export_guarded(mount, &tracks, &set, &identity).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(report.tracks, 3, "{name}");
+
+        // Pulled and not yet replaced: the path names an empty folder, as a
+        // `/Volumes/<name>` macOS could not remove does. Stands whether or
+        // not hdiutil left the mount folder behind.
+        detach(mount);
+        std::fs::create_dir_all(mount).unwrap();
+        let folder_label = identity_label(mount);
+        assert_ne!(folder_label, original_label, "{name}: fixture folder must differ from the original");
+        let stale = volume.export_guarded(mount, &tracks, &set, &identity).unwrap_err();
+        assert_eq!(stale.to_string(), expected_refusal(&folder_label), "{name}: detached");
+        assert_eq!(std::fs::read_dir(mount).unwrap().count(), 0, "{name}: wrote into the empty mount folder");
+
+        // Another volume of the same kind under the same path.
+        let mounted = Command::new("diskutil").args(["mount", "-mountPoint"]).arg(mount).arg(&other.device).output().unwrap();
+        assert!(
+            mounted.status.success(),
+            "{name}: could not mount {} at {}: {}",
+            other.device,
+            mount.display(),
+            String::from_utf8_lossy(&mounted.stderr)
+        );
+        assert_eq!(mounted_type(mount), kind, "{name}: the replacement is not the same kind of volume");
+        let new_label = identity_label(mount);
+        assert_ne!(new_label, original_label, "{name}: replacement must differ from the original");
+        assert_ne!(new_label, folder_label, "{name}: replacement must differ from the detached folder");
+        let replaced = volume.export_guarded(mount, &tracks, &set, &identity).unwrap_err();
+        assert_eq!(replaced.to_string(), expected_refusal(&new_label), "{name}: replaced");
+        eprintln!("[OBS] {name}: replacement refused: {replaced}");
+        for entry in ["Contents", "PIONEER", ".PIONEER", ".rbxport-write.lock"] {
+            assert!(!mount.join(entry).exists(), "{name}: {entry} was written to the replacement");
+        }
+        assert!(leftovers(mount).is_empty(), "{name}: {:?}", leftovers(mount));
+        let fresh = VolumeIdentity::capture(mount).unwrap_or_else(|e| panic!("{name}: {e}"));
+        fresh.check(mount).unwrap_or_else(|e| panic!("{name}: {e}"));
+        drop(other);
+
+        // The first image attached again at the same path, as a stick pulled
+        // and pushed back in. Recorded, not asserted: whether the OS reuses
+        // its device number decides it.
+        let image = volume.image.as_ref().unwrap().path().join("stick.dmg");
+        let back = Command::new("hdiutil").args(["attach", "-quiet", "-nobrowse", "-mountpoint"]).arg(mount).arg(&image).status().unwrap();
+        assert!(back.success(), "{name}: could not attach the first image again");
+        match identity.check(mount) {
+            Ok(()) => eprintln!("[OBS] {name}: the same image attached again at the same path keeps its identity"),
+            Err(e) => eprintln!("[OBS] {name}: the same image attached again at the same path is refused: {e}"),
+        }
+    }
 }
