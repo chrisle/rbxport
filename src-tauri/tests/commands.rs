@@ -319,6 +319,39 @@ fn the_summary_and_the_tree_describe_the_loaded_library() {
 }
 
 #[test]
+fn reopening_the_library_preserves_counts_with_or_without_the_snapshot() {
+    use rbl_index::cache::{self, Fingerprint};
+
+    let s = shell();
+    let initial = run(commands::library_summary(s.state())).unwrap();
+    let snapshot = s._dir.path().join("library.snapshot");
+    let fingerprint = |db: &Db| {
+        Fingerprint::of(&s.location.master_db, 6000, rbl_index::content_version(db).unwrap()).unwrap()
+    };
+    {
+        let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+        cache::save(&snapshot, &s.state().library().unwrap(), fingerprint(&db)).unwrap();
+    }
+
+    for cached in [false, true] {
+        let app = tauri::test::mock_app();
+        let state = AppState::with_backups(s._dir.path().join("backups"));
+        let db = Db::open(s.location.clone(), OpenMode::ReadOnly).unwrap();
+        let library = if cached {
+            cache::prepare(&snapshot).unwrap().validated(fingerprint(&db)).unwrap()
+        } else {
+            rbl_index::load(&db).unwrap().0
+        };
+        state.set_library(library, false, db.schema().db_version, 0, s.location.clone());
+        app.manage(Arc::new(state));
+        let reopened = run(commands::library_summary(app.state())).unwrap();
+        assert_eq!(reopened.track_count, initial.track_count);
+        assert_eq!(reopened.playlist_count, initial.playlist_count);
+        assert_eq!(reopened.db_version, initial.db_version);
+    }
+}
+
+#[test]
 fn histories_are_filed_by_year_and_named_month_in_calendar_order() {
     let s = shell();
     let tree = s.tree();
@@ -3081,6 +3114,8 @@ fn analysis_writes_the_detected_key_into_the_file_in_the_display_notation() {
 /// track must then have a waveform and a grid to edit (#132).
 #[test]
 fn an_imported_file_analyses_into_a_waveform_and_a_grid() {
+    use tauri::ipc::{InvokeResponseBody, IpcResponse};
+
     let s = shell();
     s.app.manage(Arc::new(rbxport_lib::grid::GridEditor::at(&s._dir.path().join("editor"))));
     let audio = s._dir.path().join("Click Track.wav");
@@ -3096,6 +3131,12 @@ fn an_imported_file_analyses_into_a_waveform_and_a_grid() {
         rows[0].clone()
     };
     assert_eq!(row(&s).analysed, 0, "an import alone is not analysed, as in rekordbox with Auto Analysis off");
+    let read_waveform = |kind: &str| {
+        let response = run(commands::track_waveform(s.state(), id.clone(), kind.into(), None, None)).unwrap();
+        let InvokeResponseBody::Raw(bytes) = response.body().unwrap() else { panic!("expected raw waveform bytes") };
+        bytes
+    };
+    assert!(read_waveform("bandsDetail").is_empty(), "there is no analysis after import alone");
 
     let result = run(rbxport_lib::analysis::analyse_track(
         s.handle(),
@@ -3122,6 +3163,18 @@ fn an_imported_file_analyses_into_a_waveform_and_a_grid() {
     assert_eq!(anlz.beat_grid().unwrap().len() as u32, result.beats, "the grid the GRID panel edits");
     let ext = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "EXT")).expect("the EXT is there");
     assert!(ext.waveform(b"PWV5").is_some(), "the colour detail waveform");
+
+    let two = rbl_anlz::sibling(&dat, "2EX");
+    let bands = rbl_anlz::Anlz::read(&two).unwrap();
+    let (_, detail) = bands.waveform(b"PWV7").unwrap();
+    assert!(detail.iter().any(|&value| value != 0));
+    assert_eq!(read_waveform("bandsDetail"), detail);
+    let (_, overview) = bands.waveform(b"PWV6").unwrap();
+    std::fs::write(&two, rbl_anlz::AnlzBuilder::new().waveform_scroll(b"PWV6", 3, overview).finish()).unwrap();
+    assert_ne!(row(&s).analysed, 0, "a track can have analysis without a PWV7 tag");
+    assert!(read_waveform("bandsDetail").is_empty());
+    assert_eq!(read_waveform("bands"), overview);
+    assert_eq!(read_waveform("colourDetail"), ext.waveform(b"PWV5").unwrap().1);
 }
 
 #[test]

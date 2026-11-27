@@ -63,3 +63,69 @@ test("a track loaded without analysis is analysed and its waveform drawn on the 
   await expect(bpm).not.toHaveText("");
   await expect.poll(() => drawnTo(page)).toBeGreaterThan(0.9);
 });
+
+test("a protected deck distinguishes missing analysis from a missing detail palette", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({
+    advanced: { protectLibrary: true }, analysis: { auto: false }, view: { waveformColor: "3band" },
+  })));
+  await page.route("**/src/main.tsx*", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: `
+      import { getBackend as waveformProbeBackend } from "/src/ipc/client.ts";
+      const backend = await waveformProbeBackend();
+      const waveform = backend.trackWaveform.bind(backend);
+      const analyse = backend.analyseTrack.bind(backend);
+      const probe = { omitPwv7: false, missingPwv7: 0, analysisCalls: 0 };
+      backend.trackWaveform = (id, kind, ...rest) => {
+        if (probe.omitPwv7 && kind === "bandsDetail") {
+          probe.missingPwv7++;
+          return Promise.resolve(new Uint8Array());
+        }
+        return waveform(id, kind, ...rest);
+      };
+      backend.analyseTrack = (...args) => { probe.analysisCalls++; return analyse(...args); };
+      window.deckWaveformProbe = probe;
+    ` + await response.text() });
+  });
+  await page.goto("/?writable=1");
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  await expect(rows.nth(7)).toBeVisible();
+  const examples = await rows.evaluateAll((all) => all.flatMap(row => {
+    const title = row.querySelector('[data-col="title"]')?.textContent?.trim();
+    const tempo = row.querySelector('[data-col="bpm"]')?.textContent?.trim();
+    return title && tempo !== undefined ? [{ title, analysed: tempo !== "" }] : [];
+  }));
+  const unanalysed = examples.find(row => !row.analysed)!;
+  const [complete, partial] = examples.filter(row => row.analysed);
+  const load = async (title: string) => {
+    await rows.getByRole("gridcell", { name: title, exact: true }).dblclick();
+    await expect(player(page).getByTestId("player-title")).toHaveText(title);
+  };
+  const detail = player(page).getByTestId("player-detail").locator("canvas");
+  const painted = () => detail.evaluate((canvas: HTMLCanvasElement) => {
+    const pixels = canvas.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height).data;
+    return pixels?.some((value, index) => index % 4 === 3 && value !== 0) ?? false;
+  });
+  const readProbe = () => page.evaluate(() => (window as unknown as {
+    deckWaveformProbe: { omitPwv7: boolean; missingPwv7: number; analysisCalls: number };
+  }).deckWaveformProbe);
+
+  await load(unanalysed.title);
+  await expect(detail).toHaveCount(0);
+  await load(complete.title);
+  await expect.poll(painted).toBe(true);
+
+  await page.evaluate(() => { (window as unknown as { deckWaveformProbe: { omitPwv7: boolean } }).deckWaveformProbe.omitPwv7 = true; });
+  await load(partial.title);
+  await expect.poll(async () => (await readProbe()).missingPwv7).toBe(1);
+  await expect.poll(() => drawnTo(page)).toBeGreaterThan(0);
+  await expect.poll(painted).toBe(false);
+
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const preferences = page.getByRole("dialog", { name: "Preferences" });
+  await preferences.getByRole("tab", { name: "Color" }).click();
+  await preferences.getByRole("radio", { name: "RGB" }).click();
+  await page.keyboard.press("Escape");
+  await expect.poll(painted).toBe(true);
+  expect((await readProbe()).analysisCalls).toBe(0);
+});
