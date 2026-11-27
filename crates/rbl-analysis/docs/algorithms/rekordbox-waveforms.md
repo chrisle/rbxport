@@ -187,6 +187,13 @@ comparison matched **2000/2000 PWAV color codes** and all PWV2 bytes.
 PWAV height shares remained 98.5–100% exact / 99.75–100% within one.
 [UNKNOWN] Other analyzer modes and versions are not established by this
 experiment. RGB/3-band evidence above is separate.
+`crates/rbl-export/tests/rbxport_waveforms.rs` exports each signal's authored
+analysis through the share-tree load path and holds the stick's `.DAT`
+`PWAV`/`PWV2` to these bytes, and their section headers to those of a
+rekordbox-written `.DAT` (`crates/rbl-link/tests/fixtures/ANLZ0001.DAT`).
+[UNKNOWN] Whether rekordbox's own Devices view draws the blue overview of an
+RBXport-analysed track from such a stick (#822): no fixture here captures
+that reader, and the stock view has not been observed.
 
 ## CDJ-3000 emulator check
 

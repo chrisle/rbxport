@@ -36,3 +36,6 @@ is generated here; no recorded music is included.
 [OBS] Both sections match every fixture byte. This establishes the stated
 native-routine boundary; it does not establish every rekordbox version,
 analyzer input path, player rendering, or physical-device compatibility.
+`crates/rbl-export/tests/rbxport_waveforms.rs` also holds the `PWAV`/`PWV2`
+of an exported `.DAT` to these bytes, so regenerating them changes that
+test's expectation too.

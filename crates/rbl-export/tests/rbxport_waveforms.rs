@@ -4,6 +4,12 @@
 
 mod common;
 
+/// The six generated signals rekordbox's native `LoudViewMaker` routine was
+/// run on, and its exact `PWAV`/`PWV2` for each (`*.blue-preview`), shared
+/// with `rbl-analysis`'s own tests.
+#[path = "../../rbl-analysis/tests/rekordbox_waveform/signals.rs"]
+mod signals;
+
 use rbl_export::{export, SourceTrack};
 
 /// Two stereo bursts of noise-free tone either side of digital silence and a
@@ -132,4 +138,56 @@ fn replacing_cues_keeps_the_existing_native_reference_order() {
     let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
     let saved = dest.path().join(manifest.tracks[0].anlz_dir.trim_start_matches('/')).join("ANLZ0000.EXT");
     assert_eq!(tags(&rbl_anlz::Anlz::read(&saved).unwrap()), expected);
+}
+
+/// The exported half of a local/exported analysis pair (#822): each reference
+/// signal is analysed as the app analyses it, authored as the app saves it,
+/// and exported through the share-tree load path (`analysis_source`). The
+/// stick's `.DAT` must carry the blue overviews byte for byte as the native
+/// routine wrote them, in the section framing of a rekordbox-written `.DAT`.
+/// A stage-by-stage check: `rbl-analysis`'s `blue_overview` test holds the
+/// local bytes alone, so a failure here with that test green is the export's.
+/// This does not observe rekordbox's own USB view; no fixture captures it.
+#[test]
+fn exported_blue_overviews_match_the_native_reference_and_rekordboxs_framing() {
+    let reference_dat = rbl_anlz::parse(include_bytes!("../../rbl-link/tests/fixtures/ANLZ0001.DAT")).unwrap();
+    let framing = |tag: &[u8; 4]| reference_dat.section(tag).unwrap().header.clone();
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-analysis/tests/rekordbox_waveform");
+    for signal in &signals::SIGNALS {
+        let reference = std::fs::read(fixtures.join(format!("{}.blue-preview", signal.name))).unwrap();
+        let mut creator = rbl_analysis::wave_creator::WaveCreator::new(signal.rate);
+        creator.push(&(signal.frames)(signal.rate));
+        let w = creator.finish();
+        assert_eq!(w.pwav, reference[..400], "{}: local PWAV", signal.name);
+        assert_eq!(w.pwv2, reference[400..], "{}: local PWV2", signal.name);
+        let waves = rbl_anlz::RekordboxWaves { pwav: w.pwav, pwv2: w.pwv2, pwvc: w.pwvc, pwv3: w.pwv3, pwv4: w.pwv4, pwv5: w.pwv5, pwv6: w.pwv6, pwv7: w.pwv7 };
+        let beats: Vec<_> = (0..40).map(|i| rbl_anlz::Beat { beat_number: (i % 4 + 1) as u16, tempo_x100: 12_500, time_ms: 120 + i * 480 }).collect();
+        let name = format!("{}.wav", signal.name);
+        let files = rbl_anlz::author_with_rekordbox_waves(&rbl_anlz::share_tree_ppth(&name), &beats, &waves, rbl_anlz::Existing::default());
+
+        let src = tempfile::tempdir().unwrap();
+        let dest = common::stick();
+        let audio = src.path().join(&name);
+        std::fs::write(&audio, vec![7u8; 4096]).unwrap();
+        let base = src.path().join("ANLZ0000.DAT");
+        std::fs::write(&base, files.dat).unwrap();
+        std::fs::write(base.with_extension("EXT"), files.ext).unwrap();
+        std::fs::write(base.with_extension("2EX"), files.two_ex).unwrap();
+        let track = SourceTrack {
+            source_path: audio, title: signal.name.into(), artist: "RBX".into(), album: "Reference".into(),
+            duration_sec: 20, sample_rate: signal.rate, bpm_x100: 12_500, cues: Some(Vec::new()),
+            analysis_source: Some(base), ..SourceTrack::default()
+        };
+        let report = export(dest.path(), &[track], &[]).unwrap();
+        assert!(report.verified && report.failed.is_empty() && report.skipped.is_empty(), "{}", signal.name);
+
+        let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+        let dat = rbl_anlz::Anlz::read(&dest.path().join(manifest.tracks[0].anlz_dir.trim_start_matches('/')).join("ANLZ0000.DAT")).unwrap();
+        let pwav = dat.section(b"PWAV").unwrap();
+        let pwv2 = dat.section(b"PWV2").unwrap();
+        assert_eq!(pwav.payload, reference[..400], "{}: exported PWAV", signal.name);
+        assert_eq!(pwv2.payload, reference[400..], "{}: exported PWV2", signal.name);
+        assert_eq!(pwav.header, framing(b"PWAV"), "{}: PWAV header as a rekordbox-written .DAT frames it", signal.name);
+        assert_eq!(pwv2.header, framing(b"PWV2"), "{}: PWV2 header as a rekordbox-written .DAT frames it", signal.name);
+    }
 }
