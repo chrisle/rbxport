@@ -18,8 +18,7 @@ const UNAVAILABLE: &str = "This platform did not provide the dropped files' loca
 pub fn dropped_file_paths(names: Vec<String>) -> Result<Vec<String>, String> {
     #[cfg(target_os = "macos")]
     {
-        let paths = macos_paths();
-        validate_paths(&names, paths)
+        macos_paths(&names)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -40,12 +39,39 @@ pub fn dropped_file_paths(names: Vec<String>) -> Result<Vec<String>, String> {
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
-fn macos_paths() -> Vec<String> {
+fn macos_paths(names: &[String]) -> Result<Vec<String>, String> {
     use objc2_app_kit::{NSPasteboard, NSPasteboardNameDrag};
 
     // SAFETY: AppKit exports these immutable, process-lifetime NSString constants.
     let board = NSPasteboard::pasteboardWithName(unsafe { NSPasteboardNameDrag });
-    pasteboard_paths(&board)
+    resolve_pasteboard_paths(&board, names)
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn resolve_pasteboard_paths(
+    board: &objc2_app_kit::NSPasteboard,
+    names: &[String],
+) -> Result<Vec<String>, String> {
+    use objc2::ClassType;
+    use objc2_foundation::{NSArray, NSURL};
+
+    if let Ok(paths) = validate_paths(names, pasteboard_paths(board)) {
+        return Ok(paths);
+    }
+
+    // A local file can be published as a generic URL instead of a per-item
+    // file URL string. Ask AppKit for URLs and validate the full selection.
+    let classes = NSArray::from_slice(&[NSURL::class()]);
+    // SAFETY: NSURL conforms to NSPasteboardReading; no custom options are used.
+    let paths = unsafe { board.readObjectsForClasses_options(&classes, None) }
+        .map_or_else(Vec::new, |items| {
+            items
+                .iter()
+                .filter_map(|item| item.downcast_ref::<NSURL>().and_then(local_file_path))
+                .collect()
+        });
+    validate_paths(names, paths)
 }
 
 #[cfg(target_os = "macos")]
@@ -63,12 +89,17 @@ fn pasteboard_paths(board: &objc2_app_kit::NSPasteboard) -> Vec<String> {
             // SAFETY: immutable NSString constant exported by AppKit.
             let value = item.stringForType(unsafe { NSPasteboardTypeFileURL })?;
             let url = NSURL::URLWithString(&value)?;
-            if !url.isFileURL() {
-                return None;
-            }
-            url.path().map(|path| path.to_string())
+            local_file_path(&url)
         })
         .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn local_file_path(url: &objc2_foundation::NSURL) -> Option<String> {
+    if !url.isFileURL() {
+        return None;
+    }
+    url.path().map(|path| path.to_string())
 }
 
 /// Refuse incomplete or unrelated pasteboard contents instead of importing a
@@ -337,6 +368,31 @@ mod tests {
             board.setString_forType(&NSString::from_str("https://example.com/a.mp3"), file_type)
         );
         assert_eq!(super::pasteboard_paths(&board), Vec::<String>::new());
+        board.clearContents();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[allow(unsafe_code)]
+    fn resolves_local_file_published_as_generic_url() {
+        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeURL};
+        use objc2_foundation::NSString;
+
+        let board = NSPasteboard::pasteboardWithUniqueName();
+        // SAFETY: immutable NSString constant exported by AppKit.
+        let url_type = unsafe { NSPasteboardTypeURL };
+        let name = "track #1.wav".to_owned();
+        let file_url = NSString::from_str("file:///private/tmp/track%20%231.wav");
+        assert!(board.setString_forType(&file_url, url_type));
+        assert_eq!(
+            super::resolve_pasteboard_paths(&board, std::slice::from_ref(&name)),
+            Ok(vec!["/private/tmp/track #1.wav".into()])
+        );
+        assert!(super::resolve_pasteboard_paths(&board, &[name.clone(), "missing.wav".into()]).is_err());
+        board.clearContents();
+        let web_url = NSString::from_str("https://example.invalid/track%20%231.wav");
+        assert!(board.setString_forType(&web_url, url_type));
+        assert!(super::resolve_pasteboard_paths(&board, &[name]).is_err());
         board.clearContents();
     }
 
