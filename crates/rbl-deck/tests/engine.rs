@@ -1392,12 +1392,19 @@ fn a_drag_sounds_on_a_deck_that_has_only_been_loaded_never_played() {
     assert!(!h.engine.snapshot().a.playing);
 }
 
-/// The tone at full scale, so two of them sum to twice what the device takes.
+// Match the engine's ring block size. Decks drain independently, so one may
+// fall a block behind. Repeating the phase each block keeps their tones
+// aligned for the clipping check even when that happens.
+const BLOCK_FRAMES: usize = 512;
+const LOUD_TONE_CYCLES_PER_BLOCK: usize = 3;
+
+/// A near-full-scale tone whose phase repeats exactly each block.
 fn loud_tone(path: &Path, frames: usize) {
     let mut samples = Vec::with_capacity(frames * 2);
     for frame in 0..frames {
-        let t = frame as f32 / RATE as f32;
-        let value = 0.99 * (t * 220.0 * std::f32::consts::TAU).sin();
+        let in_block = (frame % BLOCK_FRAMES) as f32 / BLOCK_FRAMES as f32;
+        let phase = in_block * LOUD_TONE_CYCLES_PER_BLOCK as f32 * std::f32::consts::TAU;
+        let value = 0.99 * phase.sin();
         samples.push(value);
         samples.push(value);
     }
@@ -1420,7 +1427,7 @@ fn two_decks_summed(h: &Harness) -> Vec<f32> {
     h.engine.master().reduction_db();
     let mut out = Vec::new();
     for _ in 0..40 {
-        out.extend(h.sink.pull(512));
+        out.extend(h.sink.pull(BLOCK_FRAMES));
         std::thread::sleep(Duration::from_millis(2));
     }
     out
@@ -1448,7 +1455,14 @@ fn the_limiter_off_leaves_the_clamp_to_flat_top_the_sum() {
     let h = harness();
     let out = two_decks_summed(&h);
     let flat = out.iter().filter(|s| s.abs() >= 1.0).count();
-    assert!(flat > 100, "only {flat} samples hit the rail: the sum was not clipped");
+    let peak = out.iter().fold(0.0_f32, |a, s| a.max(s.abs()));
+    assert!(
+        flat > 100,
+        "only {flat} of {} samples hit the rail: the sum was not clipped (peak {peak}, heads A {} B {})",
+        out.len(),
+        h.position(Deck::A),
+        h.position(Deck::B)
+    );
     assert!(h.engine.master().reduction_db() < 1e-6, "off, the limiter reported work");
 }
 
