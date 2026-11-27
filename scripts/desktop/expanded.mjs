@@ -265,7 +265,7 @@ export async function expanded(c) {
     const target = `${tree}[data-kind="folder"][data-file-drop-playlist=${JSON.stringify(parent.id)}]`;
     await until(() => app().count(target), 'writable playlist folder drop target');
 
-    await nativeDrop([sourceFolder], target);
+    await nativeDrop([sourceFolder], target, {verifySurface: true});
     const playlistName = path.basename(sourceFolder);
     await waitText('footer', `Made playlists: ${playlistName}.`);
     const after = database();
