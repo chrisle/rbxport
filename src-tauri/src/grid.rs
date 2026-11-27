@@ -206,7 +206,7 @@ impl GridEditor {
     /// The editor for the installed library: locks and backups under the
     /// app's own data directory, beside the database backups.
     pub fn new() -> Self {
-        let root = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("rbxport");
+        let root = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("rbxport-triode");
         Self::at(&root)
     }
 

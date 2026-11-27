@@ -86,7 +86,7 @@ pub fn state_dir() -> PathBuf {
     }
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("rbxport/backups")
+        .join("rbxport-triode/backups")
 }
 
 /// Where RBXport's Default backup folder setting is saved, as a JSON string.

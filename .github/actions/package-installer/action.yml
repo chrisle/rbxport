@@ -89,7 +89,13 @@ runs:
         TARGET: ${{ inputs.target }}
       run: |
         set -euo pipefail
-        binary="${CARGO_TARGET_DIR:-target}/$TARGET/release/bundle/macos/rbxport.app/Contents/MacOS/rbxport"
+        product="$(node -p 'require("./src-tauri/tauri.conf.json").productName')"
+        identifier="$(node -p 'require("./src-tauri/tauri.conf.json").identifier')"
+        contents="${CARGO_TARGET_DIR:-target}/$TARGET/release/bundle/macos/$product.app/Contents"
+        test "$(plutil -extract CFBundleIdentifier raw "$contents/Info.plist")" = "$identifier"
+        test "$(plutil -extract CFBundleShortVersionString raw "$contents/Info.plist")" = "$RELEASE_VERSION"
+        executable="$(plutil -extract CFBundleExecutable raw "$contents/Info.plist")"
+        binary="$contents/MacOS/$executable"
         actual="$(lipo -archs "$binary")"
         if [ "$actual" != "$EXPECTED_ARCH" ]; then
           echo "::error::Expected $EXPECTED_ARCH, got $actual"

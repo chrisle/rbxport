@@ -1,0 +1,84 @@
+name: Release Triode
+
+on:
+  push:
+    tags: ['triode-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-triode
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      source_ref: ${{ steps.release.outputs.source_ref }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Triode release source
+        id: release
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#triode-v}"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Use a release tag like triode-v0.1.0."
+            exit 1
+          fi
+          git merge-base --is-ancestor HEAD origin/triode
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
+            if (config.identifier !== "com.rbxport.triode" ||
+                config.plugins.updater.endpoints.join() !== "https://download.rbxport.com/triode/latest.json") {
+              throw new Error("Expected the Triode bundle identifier and updater endpoint");
+            }
+          '
+          echo "source_ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build-installer.yml
+    secrets: inherit
+    with:
+      host: '["self-hosted","macos","arm64"]'
+      target: aarch64-apple-darwin
+      bundles: app,dmg
+      slug: darwin-aarch64
+      source_ref: ${{ needs.prepare.outputs.source_ref }}
+      release_tag: v${{ needs.prepare.outputs.version }}
+      preview: false
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: installers-aarch64-apple-darwin
+          path: out
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Publish and verify the Triode update
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ vars.R2_BUCKET }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_REF: ${{ needs.prepare.outputs.source_ref }}
+        run: node scripts/publish-triode.mjs

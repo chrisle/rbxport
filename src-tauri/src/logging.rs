@@ -29,9 +29,9 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-/// Where the log files go: `<data dir>/rbxport/logs`, beside the backups,
+/// Where the log files go: `<data dir>/rbxport-triode/logs`, beside the backups,
 /// unless `RBXPORT_LOG_DIR` names somewhere else.
-const LOG_DIR: &str = "rbxport/logs";
+const LOG_DIR: &str = "rbxport-triode/logs";
 /// Names the log directory, for a test or a support case.
 pub const LOG_DIR_ENV: &str = "RBXPORT_LOG_DIR";
 /// Daily files older than the newest this many are removed.

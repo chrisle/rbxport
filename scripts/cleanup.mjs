@@ -61,25 +61,25 @@ function appDirectories(platform = process.platform, environment = process.env) 
   if (platform === "darwin") {
     return {
       caches: [
-        path.join(home, "Library/Caches/com.rbxport.app"),
-        path.join(home, "Library/Caches/rbxport"),
+        path.join(home, "Library/Caches/com.rbxport.triode"),
+        path.join(home, "Library/Caches/rbxport-triode"),
       ],
-      state: path.join(home, "Library/Application Support/rbxport/backups"),
+      state: path.join(home, "Library/Application Support/rbxport-triode/backups"),
     };
   }
   if (platform === "win32") {
     const local = environment.LOCALAPPDATA;
     const roaming = environment.APPDATA;
     return {
-      caches: local ? [path.join(local, "com.rbxport.app"), path.join(local, "rbxport")] : [],
-      state: roaming ? path.join(roaming, "rbxport/backups") : path.join(tmpdir(), "rbxport/backups"),
+      caches: local ? [path.join(local, "com.rbxport.triode"), path.join(local, "rbxport-triode")] : [],
+      state: roaming ? path.join(roaming, "rbxport-triode/backups") : path.join(tmpdir(), "rbxport-triode/backups"),
     };
   }
   const cache = environment.XDG_CACHE_HOME || path.join(home, ".cache");
   const data = environment.XDG_DATA_HOME || path.join(home, ".local/share");
   return {
-    caches: [path.join(cache, "com.rbxport.app"), path.join(cache, "rbxport")],
-    state: path.join(data, "rbxport/backups"),
+    caches: [path.join(cache, "com.rbxport.triode"), path.join(cache, "rbxport-triode")],
+    state: path.join(data, "rbxport-triode/backups"),
   };
 }
 
