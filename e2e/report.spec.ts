@@ -30,6 +30,87 @@ test("bug reports include diagnostics by default and open the attachment externa
   await expect(report).toHaveCount(0);
 });
 
+test("an email-only archive failure stays visible and retries the same submission", async ({ page, baseURL }) => {
+  if (!baseURL) throw new Error("The report test requires the local app URL.");
+  const origin = new URL(baseURL).origin;
+  const submits: Record<string, unknown>[] = [];
+  const message = "The report could not be submitted. Please try again later.";
+  const email = `rbxport-476-${crypto.randomUUID()}@example.test`;
+  const description = "The export stopped before it finished.";
+  // This fixture checks client transport of an opaque receipt. Only the
+  // Worker can authenticate it; no real signing key or service is used here.
+  const payload = Buffer.from(JSON.stringify([42, crypto.randomUUID(), new Date().toISOString()])).toString("base64url");
+  const retryReceipt = `${payload}.${Buffer.alloc(32).toString("base64url")}`;
+  await page.route("**/*", async route => {
+    if (new URL(route.request().url()).origin === origin) await route.continue();
+    else await route.abort();
+  });
+  await page.route("https://report.rbxport.com/verify?**", async route => {
+    expect(new URL(route.request().url()).searchParams.get("origin")).toBe(origin);
+    await route.fulfill({
+      contentType: "text/html",
+      body: `<script>
+        const origin = ${JSON.stringify(origin)};
+        const send = token => parent.postMessage({source:"rbxport-verify",type:"token",token}, origin);
+        addEventListener("message", event => {
+          if (event.origin === origin && event.source === parent &&
+              event.data?.source === "rbxport-verify" && event.data.type === "reset") {
+            document.body.textContent = "Reset acknowledged";
+            addEventListener("release-retry-token", () => send("retry-token"), {once: true});
+          }
+        });
+        send("initial-token");
+      </script><body></body>`,
+    });
+  });
+  await page.route("https://report.rbxport.com/", async route => {
+    const headers = {
+      "access-control-allow-origin": origin,
+      "access-control-allow-methods": "POST, PATCH",
+      "access-control-allow-headers": "content-type",
+    };
+    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+    expect(route.request().method()).toBe(submits.length === 0 ? "POST" : "PATCH");
+    submits.push(route.request().postDataJSON() as Record<string, unknown>);
+    const first = submits.length === 1;
+    await route.fulfill({
+      status: first ? 502 : 200,
+      headers,
+      json: first ? { error: message, retryReceipt } : {
+        key: "#42", url: "https://github.com/chrisle/rbxport/issues/42", attachmentAdded: true,
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("contentinfo").getByRole("button", { name: "Report bug", exact: true }).click();
+  const report = page.getByRole("dialog", { name: "Report bug", exact: true });
+  const send = report.getByRole("button", { name: "Send report" });
+  await report.getByLabel("Your email (optional)").fill(email);
+  await report.getByLabel("What happened?").fill(description);
+  await report.getByRole("checkbox").uncheck();
+  await send.click();
+  await expect(report.getByRole("alert")).toHaveText(message);
+  const verifier = report.frameLocator('iframe[title="Human verification"]').locator("body");
+  await expect(verifier).toContainText("Reset acknowledged");
+  await expect(send).toBeDisabled();
+  await expect(report.getByLabel("Your email (optional)")).toHaveValue(email);
+  await expect(report.getByLabel("What happened?")).toHaveValue(description);
+  await expect(report.getByText("Thank you for your report.")).toHaveCount(0);
+  await verifier.evaluate(body => body.ownerDocument.defaultView?.dispatchEvent(new Event("release-retry-token")));
+  await expect(send).toBeEnabled();
+  await expect(report.getByRole("alert")).toHaveText(message);
+
+  await send.click();
+  await expect(report).toContainText("Thank you for your report.");
+  await expect(report.getByLabel("Bookmark this URL and check back to get updates of your report."))
+    .toHaveValue("https://github.com/chrisle/rbxport/issues/42");
+  expect(submits).toEqual([
+    { email, description, attachment: "", turnstileToken: "initial-token" },
+    { email, description, attachment: "", turnstileToken: "retry-token", retryReceipt },
+  ]);
+});
+
 test("Preferences offers Report bug at the bottom of its sidebar", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();

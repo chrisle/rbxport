@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import { formatBugReportAttachment, submitBugReport, type BugReportReceipt } from "@/lib/bugReport";
+import {
+  BugReportSubmissionError, formatBugReportAttachment, submitBugReport, type BugReportReceipt,
+  type BugReportSubmission,
+} from "@/lib/bugReport";
 import { loadPreferences } from "@/lib/preferences";
 import { startWindowDrag } from "@/lib/windowDrag";
 import styles from "./ReportBug.module.css";
@@ -107,9 +110,17 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
   const [turnstileToken, setTurnstileToken] = useState("");
   const [receipt, setReceipt] = useState<BugReportReceipt | null>(null);
   const [resetCount, setResetCount] = useState(0);
-  const receiveTurnstileToken = useCallback((token: string) => { setTurnstileToken(token); if (token) setError(""); }, []);
+  const [verificationError, setVerificationError] = useState("");
+  const [retry, setRetry] = useState<Omit<BugReportSubmission, "turnstileToken"> | null>(null);
+  const [retryUnavailable, setRetryUnavailable] = useState(false);
+  const receiveTurnstileToken = useCallback((token: string) => {
+    setTurnstileToken(token);
+    if (token) setVerificationError("");
+  }, []);
   // Turnstile's own code, so a report of this message says which failure it was.
-  const reportTurnstileError = useCallback((code: string) => setError(`Human verification could not load (${code}). Check your connection and try again.`), []);
+  const reportTurnstileError = useCallback((code: string) => setVerificationError(
+    `Human verification could not load (${code}). Check your connection and try again.`,
+  ), []);
   useEffect(() => {
     const generation = ++diagnosticGeneration.current;
     setOpening(false);
@@ -125,6 +136,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
     }
     return () => { diagnosticGeneration.current = generation + 1; };
   }, [include]);
+  const currentError = [error, verificationError].filter(Boolean).join(" ");
   const body = (
     <section className={styles.dialog} role="dialog" aria-label="Report bug" aria-modal={windowed ? undefined : true}>
       <header className={styles.title} onMouseDown={windowed ? startWindowDrag : undefined}>
@@ -133,27 +145,32 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
       </header>
       {receipt ? <ReportSent receipt={receipt} onClose={onClose} /> : <form className={styles.form} onSubmit={event => {
         event.preventDefault();
-        if (busy || (include && attachment === null)) return;
+        if (busy || retryUnavailable || !turnstileToken || (include && attachment === null)) return;
         setBusy(true); setError(""); setReceipt(null);
         const submittedAttachment = include && attachment !== null
           ? formatBugReportAttachment(attachment, email, loadPreferences())
           : "";
-        void submitBugReport({ email, description, attachment: submittedAttachment, turnstileToken })
-          .then(setReceipt).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-          .finally(() => { setBusy(false); setTurnstileToken(""); setResetCount(count => count + 1); });
+        const submission = retry ?? { email, description, attachment: submittedAttachment };
+        void submitBugReport({ ...submission, turnstileToken }).then(setReceipt).catch((e: unknown) => {
+          if (e instanceof BugReportSubmissionError) {
+            if (e.retryReceipt) setRetry({ ...submission, retryReceipt: e.retryReceipt });
+            if (e.retryUnavailable) setRetryUnavailable(true);
+          }
+          setError(e instanceof Error ? e.message : String(e));
+        }).finally(() => { setBusy(false); setTurnstileToken(""); setResetCount(count => count + 1); });
       }}>
         <div className={styles.fields}>
           <label className={styles.email}>
             <span>Your email <span className={styles.optional}>(optional)</span></span>
-            <input type="email" autoComplete="email" placeholder="you@example.com" maxLength={320} value={email} onChange={e => setEmail(e.target.value)} />
+            <input type="email" autoComplete="email" placeholder="you@example.com" maxLength={320} disabled={busy || retry !== null} value={email} onChange={e => setEmail(e.target.value)} />
           </label>
           <label className={styles.description}>What happened?
-            <textarea required maxLength={30000} rows={7} placeholder="What were you doing, what went wrong, and what did you expect?" value={description} onChange={e => setDescription(e.target.value)} />
+            <textarea required maxLength={30000} rows={7} placeholder="What were you doing, what went wrong, and what did you expect?" disabled={busy || retry !== null} value={description} onChange={e => setDescription(e.target.value)} />
           </label>
           <p className={styles.hint}>What you write here is posted publicly on GitHub. Your email and the log are kept private.</p>
           <div className={styles.attachments}>
             <div className={styles.attachmentControls}>
-              <label className={styles.toggle}><input type="checkbox" checked={include} onChange={e => setInclude(e.target.checked)} />Attach log and system information</label>
+              <label className={styles.toggle}><input type="checkbox" disabled={busy || retry !== null} checked={include} onChange={e => setInclude(e.target.checked)} />Attach log and system information</label>
               <button type="button" className={styles.previewToggle} disabled={!include || attachment === null || opening} onClick={() => {
                 if (attachment === null) return;
                 const generation = diagnosticGeneration.current;
@@ -173,12 +190,12 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
           </div>
           <Turnstile onToken={receiveTurnstileToken} onError={reportTurnstileError} resetCount={resetCount} />
           {diagnosticError ? <p className={styles.error} role="alert">{diagnosticError}</p> : null}
-          {error ? <p className={styles.error} role="alert">{error}</p> : null}
+          {currentError ? <p className={styles.error} role="alert">{currentError}</p> : null}
         </div>
         <footer>
           <span className={styles.hint}>Reports are sent to TRIODE. I read every report, but please don’t expect a personal reply.</span>
           <button type="button" onClick={onClose}>Close</button>
-          <button className={styles.save} type="submit" disabled={busy || !turnstileToken || !description.trim() || (include && attachment === null)}>{busy ? "Sending…" : "Send report"}</button>
+          <button className={styles.save} type="submit" disabled={busy || retryUnavailable || !turnstileToken || !description.trim() || (include && attachment === null)}>{busy ? "Sending…" : "Send report"}</button>
         </footer>
       </form>}
     </section>

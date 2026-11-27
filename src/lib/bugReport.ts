@@ -6,6 +6,18 @@ export interface BugReportSubmission {
   description: string;
   attachment: string;
   turnstileToken: string;
+  retryReceipt?: string;
+}
+
+export class BugReportSubmissionError extends Error {
+  readonly retryReceipt: string | undefined;
+  readonly retryUnavailable: boolean;
+
+  constructor(message: string, retryReceipt?: string, retryUnavailable = false) {
+    super(message);
+    this.retryReceipt = retryReceipt;
+    this.retryUnavailable = retryUnavailable;
+  }
 }
 
 export interface BugReportReceipt {
@@ -51,7 +63,7 @@ export function readReceipt(value: unknown): BugReportReceipt | null {
  */
 export async function submitBugReport(submission: BugReportSubmission): Promise<BugReportReceipt> {
   const response = await fetch(REPORT_URL, {
-    method: "POST",
+    method: submission.retryReceipt ? "PATCH" : "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...submission, email: submission.email.trim() }),
   });
@@ -59,7 +71,12 @@ export async function submitBugReport(submission: BugReportSubmission): Promise<
   if (!response.ok) {
     const message = body && typeof body === "object" && "error" in body && typeof body.error === "string"
       ? body.error : "The report could not be submitted. Please try again later.";
-    throw new Error(message);
+    const retryReceipt = response.status === 502 && body && typeof body === "object" &&
+      "retryReceipt" in body && typeof body.retryReceipt === "string" &&
+      body.retryReceipt.length <= 512 && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(body.retryReceipt)
+      ? body.retryReceipt : undefined;
+    const retryUnavailable = Boolean(submission.retryReceipt) && (response.status === 405 || response.status === 409);
+    throw new BugReportSubmissionError(message, retryReceipt, retryUnavailable);
   }
   const receipt = readReceipt(body);
   if (!receipt) {

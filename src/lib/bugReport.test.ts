@@ -71,6 +71,17 @@ describe("submitBugReport", () => {
     expect(sent()).toEqual({ email: "dj@example.test", description: "Playback stopped.", attachment: "", turnstileToken: "t" });
   });
 
+  it("does not fall back to creating a report if the Worker rejects the retry method", async () => {
+    const fetch = vi.fn((_url: string, _init: { method: string }) =>
+      Promise.resolve(Response.json({ error: "Method not allowed." }, { status: 405 })));
+    vi.stubGlobal("fetch", fetch);
+    await expect(submitBugReport({
+      email: "retry@example.test", description: "Retry this report.", attachment: "",
+      turnstileToken: "fresh-token", retryReceipt: "fixture-receipt",
+    })).rejects.toMatchObject({ message: "Method not allowed.", retryUnavailable: true });
+    expect(fetch.mock.calls.map(([, request]) => request.method)).toEqual(["PATCH"]);
+  });
+
   it("sends a blank email as an empty string", async () => {
     const sent = stubService();
     await submitBugReport({ email: "   ", description: "Playback stopped.", attachment: "log", turnstileToken: "t" });
