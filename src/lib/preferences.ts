@@ -156,9 +156,10 @@ export interface ViewPreferences {
   beatCount: BeatCount;
   /**
    * Display Type › Click on the waveform for PLAY and CUE. On, a click on
-   * the enlarged waveform moves the playhead there, sets the cue there when
-   * the deck is stopped, and plays; the window's switch is "Disable", so
-   * this is stored the way round the deck reads it.
+   * the enlarged waveform plays a stopped deck, and pauses a playing one
+   * and takes the playhead as its cue point; the head does not move for a
+   * click. The window's switch is "Disable", so this is stored the way
+   * round the deck reads it.
    */
   waveformClick: boolean;
 }
