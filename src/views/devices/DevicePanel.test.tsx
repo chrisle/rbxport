@@ -39,7 +39,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); __setBackend(null); 
 it("edits legacy menus without enabling OneLibrary-owned name or colour settings", async () => {
   const legacy = { ...settings(), hasOneLibrary: false, hasLibrarySettings: false };
   const save = vi.fn((_path: string, next: DeviceSettings) => Promise.resolve(next));
-  __setBackend({ deviceSettings: () => Promise.resolve(legacy), saveDeviceSettings: save } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: () => Promise.resolve(legacy), saveDeviceSettings: save } as unknown as Backend);
   render(); await settle(); tab("Column");
   expect(column().disabled).toBe(false);
   expect(column().value).toBe("2");
@@ -51,12 +51,12 @@ it("edits legacy menus without enabling OneLibrary-owned name or colour settings
   }
   tab("Color");
   expect(Array.from(host.querySelectorAll<HTMLInputElement>("input")).every(input => input.disabled)).toBe(true);
-  tab("General");
+  tab("General"); await settle();
   expect(host.querySelector<HTMLInputElement>('input[maxlength="64"]')?.disabled).toBe(true);
 });
 
 it("reverts the current failed save to confirmed settings", async () => {
-  __setBackend({ deviceSettings: () => Promise.resolve(settings()), saveDeviceSettings: () => Promise.reject(new Error("generated refusal")) } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: () => Promise.resolve(settings()), saveDeviceSettings: () => Promise.reject(new Error("generated refusal")) } as unknown as Backend);
   render(); await settle(); tab("Column"); choose(5); await settle();
   expect(column().value).toBe("2"); expect(error).toHaveBeenCalledOnce();
 });
@@ -64,7 +64,7 @@ it("reverts the current failed save to confirmed settings", async () => {
 it("does not let an older successful save overwrite a newer choice", async () => {
   const older = pending(), newer = pending();
   const save = vi.fn().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
-  __setBackend({ deviceSettings: () => Promise.resolve(settings()), saveDeviceSettings: save } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: () => Promise.resolve(settings()), saveDeviceSettings: save } as unknown as Backend);
   render(); await settle(); tab("Column"); choose(5); await settle(); choose(6); await settle();
   newer.resolve(settings(6)); await settle(); older.resolve(settings(5)); await settle();
   expect(column().value).toBe("6"); expect(error).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ it("does not let an older successful save overwrite a newer choice", async () =>
 it.each(["superseded", "another device", "unmounted"] as const)("retires a failed save after %s", async retired => {
   const older = pending();
   const save = vi.fn().mockReturnValueOnce(older.promise).mockResolvedValue(settings(6));
-  __setBackend({ deviceSettings: (path: string) => Promise.resolve(settings(path === "/generated-b" ? 6 : 2)), saveDeviceSettings: save } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: (path: string) => Promise.resolve(settings(path === "/generated-b" ? 6 : 2)), saveDeviceSettings: save } as unknown as Backend);
   render(); await settle(); tab("Column"); choose(5); await settle();
   if (retired === "superseded") choose(6);
   else if (retired === "another device") render("/generated-b");
@@ -86,7 +86,7 @@ it.each(["superseded", "another device", "unmounted"] as const)("retires a faile
 it("serializes accepted writes and reverts only the newest failure to the preceding committed save", async () => {
   const older = pending(), newer = pending();
   const save = vi.fn().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
-  __setBackend({ deviceSettings: () => Promise.resolve(settings()), saveDeviceSettings: save } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: () => Promise.resolve(settings()), saveDeviceSettings: save } as unknown as Backend);
   render(); await settle(); tab("Column"); choose(5); await settle(); choose(6); await settle();
   expect(save).toHaveBeenCalledTimes(1);
   older.resolve(settings(5)); await settle();
@@ -99,7 +99,7 @@ it("retires queued writes when the same path is remounted and waits for the new 
   const dispatched = pending(), newRead = pending();
   const save = vi.fn().mockReturnValueOnce(dispatched.promise).mockResolvedValue(settings(6));
   const read = vi.fn().mockResolvedValueOnce(settings()).mockReturnValueOnce(newRead.promise);
-  __setBackend({ deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
   render(); await settle(); tab("Column"); choose(5); await settle(); choose(6); await settle();
   expect(save).toHaveBeenCalledTimes(1);
   act(() => root.render(<div>removed device</div>));
@@ -124,7 +124,7 @@ it("retains confirmed settings and accepted queued edits for the same mounted id
   const first = pending();
   const read = vi.fn().mockResolvedValue(settings());
   const save = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(settings(6));
-  __setBackend({ deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
   renderVolume("volume-a"); await settle(); tab("Column"); choose(5); await settle(); choose(6); await settle();
   renderVolume("volume-a"); await settle();
   expect(read).toHaveBeenCalledTimes(1);
@@ -138,7 +138,7 @@ it("re-reads replacement identity with the same path and export stamp before off
   const replacement = pending();
   const read = vi.fn().mockResolvedValueOnce(settings()).mockReturnValueOnce(replacement.promise);
   const save = vi.fn();
-  __setBackend({ deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
   renderVolume("volume-a"); await settle(); tab("Column");
   renderVolume("volume-b"); await settle();
   const pendingControl = column();
@@ -153,7 +153,7 @@ it("retires not-yet-dispatched edits when a replacement keeps the path and expor
   const dispatched = pending(), replacement = pending();
   const read = vi.fn().mockResolvedValueOnce(settings()).mockReturnValueOnce(replacement.promise);
   const save = vi.fn().mockReturnValueOnce(dispatched.promise).mockResolvedValue(settings(5));
-  __setBackend({ deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: read, saveDeviceSettings: save } as unknown as Backend);
   renderVolume("volume-a"); await settle(); tab("Column"); choose(5); await settle(); choose(6); await settle();
   expect(save).toHaveBeenCalledTimes(1);
   renderVolume("volume-b"); await settle();
@@ -172,7 +172,7 @@ it("retires not-yet-dispatched edits when a replacement keeps the path and expor
 it.each(["success", "failure"] as const)("retires an initial read's late %s after same-path identity replacement", async outcome => {
   const initial = pending(), replacement = pending();
   const read = vi.fn().mockReturnValueOnce(initial.promise).mockReturnValueOnce(replacement.promise);
-  __setBackend({ deviceSettings: read } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: read } as unknown as Backend);
   renderVolume("volume-a"); await settle(); tab("Column");
   renderVolume("volume-b"); await settle();
   replacement.resolve(settings(3)); await settle();
@@ -188,7 +188,7 @@ it("does not seed defaults from an old pending read after same-path identity rep
   const initial = pending();
   const read = vi.fn().mockReturnValueOnce(initial.promise).mockResolvedValue(settings(3));
   const defaults = vi.fn().mockResolvedValue(settings(2));
-  __setBackend({ deviceSettings: read, writeDeviceDefaults: defaults } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: read, writeDeviceDefaults: defaults } as unknown as Backend);
   renderVolume("volume-a"); await settle();
   renderVolume("volume-b"); await settle();
   initial.resolve({ ...settings(2), hasDevSetting: false }); await settle();
@@ -201,7 +201,7 @@ it("seeds the replacement owner's missing DEVSETTING and retains its current tab
   const initial = pending(), seeded = pending();
   const read = vi.fn().mockReturnValueOnce(initial.promise).mockResolvedValueOnce({ ...settings(3), hasDevSetting: false });
   const defaults = vi.fn().mockReturnValueOnce(seeded.promise);
-  __setBackend({ deviceSettings: read, writeDeviceDefaults: defaults } as unknown as Backend);
+  __setBackend({ jogImage: () => Promise.resolve({ mode: null, image: null }), deviceSettings: read, writeDeviceDefaults: defaults } as unknown as Backend);
   renderVolume("volume-a"); await settle(); tab("Column");
   renderVolume("volume-b"); await settle();
   expect(read).toHaveBeenCalledTimes(2);

@@ -280,3 +280,20 @@ libraries or pending device edits block sync to preserve their data. Initial
 support exports only. Playback on an XDJ-R1 has not yet been verified;
 device-edit import and physical compatibility remain
 unverified. See [implementation and acceptance](../reference/xdj-r1.md).
+
+## Custom jog-display image
+
+In **Preferences → DJ System → General**, use **Import image file** to keep a
+JPEG or PNG as the image source. This changes only RBXport's own stored image.
+
+Select a connected drive under **Devices**, open its **General** tab, and use
+**Copy from Preferences** or **Import image file** in **Image On-Jog Display**.
+Select **CUSTOMIMAGE** to use the custom image or **ARTWORK** to use the loaded
+track's cover. Copying or deleting an image does not change this mode.
+**Delete image** removes only the selected drive's custom image.
+
+Images are converted to a square JPEG, up to 800 × 800 pixels, with black
+padding instead of cropping. JPEG/PNG sources are limited to 32 MiB and
+4096 × 4096 pixels. Existing custom images remain through ordinary exports.
+This workflow writes USB media; it does not send a custom image over LINK.
+If an interrupted export is pending, retry **Sync** before changing the image.

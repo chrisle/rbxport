@@ -159,6 +159,7 @@ export function DevicePanel({
             onSync={onSync}
             onRefresh={onRefresh}
             busy={busy}
+            onError={onError}
           />
         ) : tab === "category" ? (
           <ListPairTab

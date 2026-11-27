@@ -15,6 +15,7 @@
 
 pub mod awake;
 pub mod settings;
+pub mod jog_image;
 pub mod explorer;
 pub mod mounts;
 pub mod eject;

@@ -53,6 +53,7 @@ mod sync_window;
 mod report;
 mod scripting;
 mod device_settings;
+mod jog_image;
 pub mod dto;
 mod error;
 pub mod state;
@@ -746,6 +747,7 @@ pub fn run() {
             cues::convert_memory_cues_to_hot,
             commands::filter_values,
             device_settings::device_settings,
+            jog_image::jog_image,
             device_settings::write_device_defaults,
             device_settings::save_device_settings,
             device_settings::ensure_device_library,

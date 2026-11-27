@@ -16,7 +16,7 @@ import { rowMemoryCueColours } from "@/lib/memoryCueColours";
 import { shiftByGridBeats } from "@/lib/player";
 
 import type {
-  AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
+  AppErrorDto, Backend, JogImageState, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   DatabaseDrive, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SelectionDetails, SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, RelocateSearch, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
@@ -933,6 +933,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // What each stick's tabs hold. DJ STICK starts empty and gains a library
   // when something is exported to it; TEST carries the rows read off the
   // real stick.
+  const jogImages = new Map<string, JogImageState>();
+  const jogPreview = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#c76b29"/></svg>');
   const deviceSettings = new Map<string, DeviceSettings>([
     ["/Volumes/TEST", referenceDeviceSettings("TEST", true)],
   ]);
@@ -3626,6 +3628,29 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The device tabs. Held per stick so a change survives switching tabs
     // and devices, the way a written file would.
     deviceSettings: (path) => wait(copySettings(settingsOf(path))),
+    jogImage: (path, volumeId, action, source) => {
+      if (path !== null && !devices.some(device => device.path === path && device.volumeId === volumeId)) {
+        return Promise.reject(new Error("That device is no longer connected."));
+      }
+      if (path === null && action !== "read" && action !== "import" && action !== "delete") {
+        return Promise.reject(new Error("Choose an image action."));
+      }
+      const key = path === null ? "preference" : JSON.stringify([path, volumeId]);
+      const next = { ...(jogImages.get(key) ?? { mode: null, image: null }) };
+      if (action === "artwork" || action === "custom") next.mode = action;
+      if (action === "import") {
+        if (!source) return Promise.reject(new Error("Choose an image file."));
+        next.image = jogPreview;
+      }
+      if (action === "copy") {
+        const image = jogImages.get("preference")?.image;
+        if (!image) return Promise.reject(new Error("Import an image in Preferences first."));
+        next.image = image;
+      }
+      if (action === "delete") next.image = null;
+      jogImages.set(key, next);
+      return wait({ ...next });
+    },
     ensureDeviceLibrary: (path, defaults) => {
       const current = settingsOf(path);
       if (current.hasDeviceLibrary) return wait(copySettings(current));

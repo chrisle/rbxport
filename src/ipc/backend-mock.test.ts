@@ -726,3 +726,17 @@ it("keeps a manually moved saved loop active when Active Loop Playback is turned
     vi.useRealTimers();
   }
 });
+
+it("keeps explicit jog mode separate from image source, copy and deletion", async () => {
+  const backend = createMockBackend({ trackCount: 1 });
+  const device = (await backend.listDevices())[0]!;
+  await expect(backend.jogImage(device.path, device.volumeId, "copy")).rejects.toThrow("Import an image");
+  const source = await backend.jogImage(null, null, "import", "/generated/image.png");
+  expect(source.image).toBeTruthy();
+  await backend.jogImage(device.path, device.volumeId, "custom");
+  expect(await backend.jogImage(device.path, device.volumeId, "copy")).toEqual({ mode: "custom", image: source.image });
+  await backend.jogImage(device.path, device.volumeId, "delete");
+  expect(await backend.jogImage(device.path, device.volumeId, "read")).toEqual({ mode: "custom", image: null });
+  expect((await backend.jogImage(null, null, "read")).image).toBe(source.image);
+  await expect(backend.jogImage(device.path, "replaced", "custom")).rejects.toThrow("no longer connected");
+});

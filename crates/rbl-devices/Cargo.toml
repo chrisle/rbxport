@@ -15,6 +15,7 @@ rbl-export = { path = "../rbl-export" }
 rbl-onelibrary = { path = "../rbl-onelibrary" }
 rbl-pdb = { path = "../rbl-pdb" }
 dirs = "5"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 sysinfo = { version = "0.32", default-features = false, features = ["disk"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }

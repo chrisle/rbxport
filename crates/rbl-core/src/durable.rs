@@ -676,6 +676,31 @@ impl Publication {
         }
         if retire { Self::retire(root, journal) } else { Ok(()) }
     }
+    /// An explicit device edit bound to an already selected existing volume.
+    /// Unlike export startup, it must not recover or discard prior export state.
+    pub fn new_checked(root: &Path, name: &str, identity: &VolumeIdentity) -> std::io::Result<Self> {
+        identity.check(root)?;
+        if !std::fs::metadata(root)?.is_dir() {
+            return Err(std::io::Error::other("The destination is not a directory"));
+        }
+        let lock = lock(root)?;
+        identity.check(root)?;
+        let journal = root.join(name);
+        match std::fs::symlink_metadata(&journal) {
+            Ok(_) => return Err(std::io::Error::other("Sync this device to recover its interrupted export before changing its image.")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(error),
+        }
+        Ok(Self {
+            root: root.to_owned(),
+            journal,
+            stage: tempfile::Builder::new().prefix(STAGE_PREFIX).tempdir_in(root)
+                .map_err(at("create a staging folder in", root))?,
+            _lock: lock,
+            root_handle: same_file::Handle::from_path(root)?,
+        })
+    }
+
     pub fn new(root: &Path, name: &str) -> std::io::Result<Self> {
         create_dir_all(root)?;
         let lock = lock(root)?;

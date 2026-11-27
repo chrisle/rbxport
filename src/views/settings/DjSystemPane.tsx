@@ -9,10 +9,11 @@
  *
  * Not here: the account nickname (no account), the background colours
  * (where rekordbox keeps their defaults has not been recorded; each stick's
- * own are set on its General tab), the jog image (not written), My Settings
+ * own are set on its General tab), My Settings
  * (`MYSETTING.DAT` is not written), and the Device tab (history import is
  * not built). PRO DJ LINK, in place of rekordbox's Others tab, holds the
- * LINK switch and the network interface it runs on.
+ * LINK switch and the network interface it runs on. The jog-image source
+ * belongs to RBXport; only an explicit device Copy action pushes it to USB.
  */
 import { useEffect, useMemo, useState } from "react";
 
@@ -20,6 +21,7 @@ import { getBackend } from "@/ipc/client";
 import type { MenuSlot } from "@/ipc/types";
 import { displayName, isFixed } from "@/lib/deviceSettings";
 import { usePreferencesContext } from "@/store/usePreferences";
+import { JogImageControls } from "@/views/devices/JogImageControls";
 import { ListPairTab } from "@/views/devices/ListPairTab";
 import styles from "./Preferences.module.css";
 import { Radios, Section, Select, Sub } from "./controls";
@@ -83,6 +85,7 @@ export function DjSystemPane({ tab }: { tab: DjSystemTab }) {
 
   return (
     <>
+      <JogImageControls />
       <Section title="Waveform color">
         <Sub>Waveform color displayed on CDJ/XDJ</Sub>
         <Radios

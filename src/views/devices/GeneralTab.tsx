@@ -16,8 +16,8 @@
  *   `property` row in `export.pdb`. Both use the track-colour order, 0
  *   Default to 8 Purple [OBS rekordbox 7.2.14]. Each is offered when the
  *   stick has the database that holds it.
- * - Image On-Jog Display: drawn, inert. Where it is kept on the stick is
- *   `[UNKNOWN]`.
+ * - Image On-Jog Display: explicit USB image/mode actions share the
+ *   publication lock; the JPEG is at the volume root and the mode in DEVSETTING.DAT.
  * - The space table is real, and the sync control that the panel had before
  *   the captures lives beneath it, since that is the only place rekordbox's
  *   layout leaves for it.
@@ -31,6 +31,7 @@ import type {
 import { contentsText, formatSpace } from "@/lib/devices";
 import { useTranslation } from "@/i18n";
 import styles from "./DevicePanel.module.css";
+import { JogImageControls } from "./JogImageControls";
 import { useTooltip } from "@/store/usePreferences";
 
 interface RadioGroupProps<T extends string> {
@@ -97,11 +98,6 @@ const KEY_DISPLAYS: readonly { value: KeyDisplay; label: string }[] = [
   { value: "classic", label: "Classic" },
   { value: "alphanumeric", label: "Alphanumeric" },
 ];
-const JOG_IMAGES = [
-  { value: "artwork", label: "ARTWORK" },
-  { value: "custom", label: "CUSTOMIMAGE" },
-] as const;
-
 const UNKNOWN_DIVISIONS =
   "Not written yet: which byte of DEVSETTING.DAT holds Waveform Divisions has not been recorded.";
 /** The background colours, by the value the stick stores: the track colours after Default. */
@@ -117,8 +113,6 @@ const BACKGROUND_COLORS = [
   { value: 8, label: "Purple" },
 ] as const;
 const NO_BACKGROUND_HINT = "Export to this device first to set its background color.";
-const UNKNOWN_IMAGE =
-  "Not written yet: where the stick keeps the on-jog image has not been recorded.";
 const NO_LIBRARY = "This device has no library to hold a name; export something to it first.";
 
 interface BackgroundSelectProps {
@@ -160,6 +154,7 @@ export interface GeneralTabProps {
   onSync: (playlistId: string) => Promise<void>;
   onRefresh: () => void;
   busy: boolean;
+  onError?: ((message: string) => void) | undefined;
 }
 
 export function GeneralTab({
@@ -170,6 +165,7 @@ export function GeneralTab({
   onSync,
   onRefresh,
   busy,
+  onError,
 }: GeneralTabProps) {
   const t = useTranslation();
   // The name is committed on Enter or blur, not per keystroke: each write
@@ -269,31 +265,7 @@ export function GeneralTab({
         onChange={(keyDisplay) => onChange({ ...settings, keyDisplay })}
       />
 
-      <fieldset className={styles.group} title={tip(UNKNOWN_IMAGE)} disabled>
-        <legend className={styles.caption}>Image On-Jog Display</legend>
-        <div className={styles.radios}>
-          {JOG_IMAGES.map((option, i) => (
-            <label key={option.value} className={styles.radio} data-dim={i === 1 || undefined}>
-              <input type="radio" name="jog-image" value={option.value} checked={i === 0} readOnly />
-              {option.label}
-            </label>
-          ))}
-        </div>
-        <div className={styles.jog}>
-          <div className={styles.disc}>
-            <span className={styles.discRing} aria-hidden />
-            <span className={styles.discText}>No image</span>
-          </div>
-          <div className={styles.imageActions}>
-            {["Copy from [Preferences]", "Import image file", "Delete image"].map((label) => (
-              <button key={label} type="button" className={styles.imageButton} disabled>
-                <span className={styles.imageGlyph} aria-hidden />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </fieldset>
+      <JogImageControls device={device} busy={busy} onError={onError} />
 
       <table className={styles.space}>
         <tbody>

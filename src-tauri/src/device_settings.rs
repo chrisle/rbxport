@@ -319,13 +319,25 @@ pub async fn write_device_defaults(path: String, defaults: StickDefaultsDto) -> 
 /// has one keeps it. Called from inside a `blocking` closure, which is
 /// `spawn_blocking` with a name; never from the async thread.
 pub fn write_dev_defaults(mount: &Path, dto: &StickDefaultsDto) -> AppResult<()> {
-    let current = rbl_devices::settings::read(mount);
-    if current.dev.is_some() {
-        return Ok(());
+    // Existing leaves need no writable stage, including on read-only media.
+    // If absent here, recheck under the publication lock before creating it.
+    rbl_devices::settings::recover(mount)
+        .map_err(|error| AppError::new(ErrorKind::Internal, error.to_string()))?;
+    let path = rbl_devices::settings::export_root(mount).join("DEVSETTING.DAT");
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Err(error) => return Err(AppError::new(ErrorKind::Internal, error.to_string())),
     }
-    let next = DeviceSettings { dev: Some(dev_defaults(dto)?), library: None, ..current.clone() };
-    rbl_devices::settings::write_changes(mount, &current, &next)
-        .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))
+    rbl_devices::settings::edit(mount, |current| -> AppResult<DeviceSettings> {
+        let path = rbl_devices::settings::export_root(mount).join("DEVSETTING.DAT");
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => return Ok(current.clone()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(AppError::new(ErrorKind::Internal, error.to_string())),
+        }
+        Ok(DeviceSettings { dev: Some(dev_defaults(dto)?), library: None, ..current.clone() })
+    }).map(|_| ())
 }
 
 /// The highest background colour: 0 Default, 1 Pink .. 8 Purple.
@@ -417,13 +429,16 @@ pub async fn save_device_settings(
         if !mount.is_dir() {
             return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
         }
-        let current = rbl_devices::settings::read(mount);
-        let next = apply(&current, &settings)?;
-        rbl_devices::settings::write_changes(mount, &current, &next)
-            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
-        Ok(to_dto(&rbl_devices::settings::read(mount)))
+        let saved = rbl_devices::settings::edit(mount, |current| apply(current, &settings))?;
+        Ok(to_dto(&saved))
     })
     .await
+}
+
+impl From<rbl_devices::settings::SettingsError> for AppError {
+    fn from(error: rbl_devices::settings::SettingsError) -> Self {
+        Self::new(ErrorKind::Internal, error.to_string())
+    }
 }
 
 #[cfg(test)]

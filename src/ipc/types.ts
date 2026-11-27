@@ -1090,6 +1090,7 @@ export interface Backend {
   writeDeviceDefaults(path: string, defaults: StickDefaults): Promise<DeviceSettings>;
   /** Writes them back and resolves to what the stick now holds. */
   saveDeviceSettings(path: string, settings: DeviceSettings): Promise<DeviceSettings>;
+  jogImage(path: string | null, volumeId: string | null, action: JogImageAction, source?: string): Promise<JogImageState>;
   /**
    * Gives a stick with no database the folders rekordbox creates on connect
    * (an empty database from `defaults`), and reads its settings back. A
@@ -2464,3 +2465,8 @@ export interface DeviceSettings {
   subColumn: number | null;
   colors: ColorName[];
 }
+
+/** Explicit USB or app-owned Preferences jog image action. */
+export type JogImageMode = "artwork" | "custom";
+export type JogImageAction = "read" | "import" | "copy" | "delete" | JogImageMode;
+export interface JogImageState { mode: JogImageMode | null; image: string | null; imagePresent?: boolean; imageError?: string | null; }

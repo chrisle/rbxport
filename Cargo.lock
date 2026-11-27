@@ -4064,6 +4064,7 @@ name = "rbl-devices"
 version = "1.10.0"
 dependencies = [
  "dirs 5.0.1",
+ "image",
  "objc2-core-foundation",
  "objc2-disk-arbitration",
  "rbl-anlz",

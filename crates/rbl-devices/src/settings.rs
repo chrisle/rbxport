@@ -83,6 +83,14 @@ pub enum KeyDisplay {
     Alphanumeric,
 }
 
+/// USB jog-display modes observed in the current rekordbox writer.
+/// Other stored values, including legacy zero, are preserved until explicit selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JogImage {
+    Artwork,
+    Custom,
+}
+
 /// The settings in `DEVSETTING.DAT`, with every byte not understood kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DevSetting {
@@ -153,6 +161,28 @@ fn padded_string(bytes: &[u8]) -> String {
 }
 
 impl DevSetting {
+    /// The current writer stores this at file offset 0x77 (body offset 15).
+    #[must_use]
+    pub fn jog_image(&self) -> Option<JogImage> {
+        match self.body[15] {
+            1 => Some(JogImage::Artwork),
+            2 => Some(JogImage::Custom),
+            _ => None,
+        }
+    }
+
+    /// An explicit jog choice changes only its byte and the existing body CRC.
+    /// Do not normalize unrelated settings, strings or trailing reserved bytes.
+    #[must_use]
+    pub fn patch_jog_image(bytes: &[u8], mode: JogImage) -> Option<Vec<u8>> {
+        Self::parse(bytes)?;
+        let mut next = bytes.to_vec();
+        next[BODY_AT + 15] = match mode { JogImage::Artwork => 1, JogImage::Custom => 2 };
+        let crc = crc16_xmodem(&next[BODY_AT..BODY_AT + BODY_LEN]);
+        next[BODY_AT + BODY_LEN..BODY_AT + BODY_LEN + 2].copy_from_slice(&crc.to_le_bytes());
+        Some(next)
+    }
+
     /// Parses a file. `None` when it is not a `DEVSETTING.DAT` we understand:
     /// the wrong length, a body length other than 32, or a checksum that
     /// does not match — a file we cannot read faithfully is not one to
@@ -367,6 +397,41 @@ fn write_changes_recovered(
     current: &DeviceSettings,
     settings: &DeviceSettings,
 ) -> Result<(), SettingsError> {
+    if settings.dev.as_ref().is_none_or(|next| current.dev.as_ref() == Some(next))
+        && settings.library.as_ref().is_none_or(|next| current.library.as_ref() == Some(next))
+        && settings.device_library_background.is_none_or(|next| current.device_library_background == Some(next))
+        && settings.legacy_menus.as_ref().is_none_or(|next| current.legacy_menus.as_ref() == Some(next))
+    {
+        return Ok(());
+    }
+    let publication = rbl_core::durable::Publication::new(mount_point, ".rbxport-publication")?;
+    write_changes_locked(mount_point, current, settings, &publication)
+}
+
+/// Applies a panel edit to the settings read after recovery and lock acquisition.
+/// The caller's validation error is retained; no base is read before serialization.
+pub fn edit<E>(
+    mount_point: &Path,
+    change: impl FnOnce(&DeviceSettings) -> Result<DeviceSettings, E>,
+) -> Result<DeviceSettings, E>
+where
+    E: From<SettingsError>,
+{
+    recover(mount_point).map_err(SettingsError::from)?;
+    let publication = rbl_core::durable::Publication::new(mount_point, ".rbxport-publication")
+        .map_err(SettingsError::from)?;
+    let current = read_files(mount_point);
+    let next = change(&current)?;
+    write_changes_locked(mount_point, &current, &next, &publication)?;
+    Ok(read_files(mount_point))
+}
+
+fn write_changes_locked(
+    mount_point: &Path,
+    current: &DeviceSettings,
+    settings: &DeviceSettings,
+    publication: &rbl_core::durable::Publication,
+) -> Result<(), SettingsError> {
     let dev_changed = settings.dev.as_ref().is_some_and(|next| current.dev.as_ref() != Some(next));
     let library_changed = settings
         .library
@@ -380,7 +445,6 @@ fn write_changes_recovered(
     }
 
     let root = export_root(mount_point);
-    let publication = rbl_core::durable::Publication::new(mount_point, ".rbxport-publication")?;
     let relative = root.strip_prefix(mount_point).map_err(std::io::Error::other)?;
     let staged_root = publication.stage().join(relative);
     // Plan every requested legacy table before staging any settings group.
@@ -518,6 +582,32 @@ mod tests {
         0x01, 0x01, 0x04, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8f, 0x1a, 0x00, 0x00,
     ];
+
+    #[test]
+    fn explicit_jog_mode_changes_only_its_byte_and_crc() {
+        let mut original = DevSetting::default().encode();
+        original[0x44..0x48].copy_from_slice(b"test");
+        original[BODY_AT + 10] = 0x7f;
+        original[FILE_LEN - 1] = 0xa5;
+        for old in [0, 1, 2, 0xff] {
+            original[0x77] = old;
+            let crc = crc16_xmodem(&original[BODY_AT..BODY_AT + BODY_LEN]);
+            original[BODY_AT + BODY_LEN..BODY_AT + BODY_LEN + 2].copy_from_slice(&crc.to_le_bytes());
+            for (mode, byte) in [(JogImage::Artwork, 1), (JogImage::Custom, 2)] {
+                let next = DevSetting::patch_jog_image(&original, mode).unwrap();
+                assert_eq!(next[0x77], byte);
+                assert_eq!(DevSetting::parse(&next).unwrap().jog_image(), Some(mode));
+                for index in 0..FILE_LEN {
+                    if index != 0x77 && !(BODY_AT + BODY_LEN..BODY_AT + BODY_LEN + 2).contains(&index) {
+                        assert_eq!(next[index], original[index], "byte {index}");
+                    }
+                }
+                assert_eq!(DevSetting::patch_jog_image(&next, mode).unwrap(), next);
+            }
+        }
+        original[0x77] ^= 1;
+        assert!(DevSetting::patch_jog_image(&original, JogImage::Artwork).is_none());
+    }
 
     #[test]
     fn the_crc_is_the_one_the_real_files_carry() {
