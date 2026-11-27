@@ -3885,7 +3885,7 @@ function AppBody() {
           total: analysis.total,
           waiting: analysis.waiting,
         } : undefined}
-        activity={statusActivity || (summary ? "" : "Loading the library…")}
+        activity={statusActivity || (summary === null && loadError === null ? t("Loading the library…") : "")}
         // Everything that went wrong, in one place and in red: the deck's
         // refusals, a library that would not open, and a write the library
         // turned down.

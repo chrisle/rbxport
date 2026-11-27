@@ -107,6 +107,34 @@ test("a view opened before the library is ready fills in once it is", async ({ p
   await expect(page.locator('[role="row"] [data-col="title"]').first()).not.toBeEmpty();
 });
 
+test("a library startup failure replaces the loading message and remains in the log", async ({ page }) => {
+  const message = "database disk image is malformed";
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch();
+    const fixture = `
+      import { getBackend as startupBackend } from "/src/ipc/client.ts";
+      const backend = await startupBackend();
+      const subscribe = backend.onLibraryProblem;
+      backend.onLibraryProblem = listener => {
+        window.__failLibraryStartup = () => listener({ kind: "failed", message: ${JSON.stringify(message)} });
+        return subscribe(listener);
+      };
+    `;
+    await route.fulfill({ response, body: fixture + await response.text() });
+  });
+  await page.goto("/?slow");
+  const footer = page.getByRole("contentinfo");
+  await expect(footer).toContainText("Loading the library…");
+  await page.waitForFunction(() => typeof (window as unknown as { __failLibraryStartup?: unknown }).__failLibraryStartup === "function");
+  await page.evaluate(() => (window as unknown as { __failLibraryStartup: () => void }).__failLibraryStartup());
+
+  const error = footer.getByRole("alert").getByRole("button", { name: message });
+  await expect(error).toBeVisible();
+  await expect(footer).not.toContainText("Loading the library…");
+  await error.click();
+  await expect(page.getByRole("log", { name: "Log lines" })).toContainText(message);
+});
+
 test("scrolling a recovered view still fetches the rows it lands on", async ({ page }) => {
   // The original report: pick the playlists root, drag the scrollbar halfway,
   // see nothing. A view that opened empty stays empty at every scroll position,
