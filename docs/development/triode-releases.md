@@ -20,6 +20,8 @@ in to the branch. To set it, run `node scripts/sync-version.mjs --version VERSIO
 
 The [Release Triode workflow](../../.github/workflows/release-triode.yml)
 uses the existing Apple and updater signing credentials and R2 bucket.
+The repository variable `TRIODE_CARGO_TARGET_DIR` points to the build cache
+on the Mac runner's Raid5 volume.
 It publishes the DMG and signed update archive to a versioned path under
 `triode/releases/` before updating the feed. Get the DMG URL from the feed's
 `downloads.darwin-aarch64.url` field. Subsequent versions arrive through

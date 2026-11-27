@@ -54,6 +54,7 @@ jobs:
       source_ref: ${{ needs.prepare.outputs.source_ref }}
       release_tag: v${{ needs.prepare.outputs.version }}
       preview: false
+      macos_cargo_target_dir: ${{ vars.TRIODE_CARGO_TARGET_DIR }}
 
   publish:
     needs: [prepare, build]
