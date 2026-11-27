@@ -6,7 +6,7 @@
  * files; desktop dev and release/installer workflows invoke it.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -24,6 +24,29 @@ if (!version || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z]+(?:[.-]
   throw new Error("No valid release version. Fetch release tags or pass --version VERSION.");
 }
 
+// Only RBXport's application and crates inherit the workspace version. A
+// local dependency such as the vendored updater also has no lockfile source.
+const crates = new URL("../crates/", import.meta.url);
+const crateManifests = readdirSync(crates, { withFileTypes: true })
+  .filter(entry => entry.isDirectory())
+  .map(entry => new URL(`${entry.name}/Cargo.toml`, crates));
+const appManifest = new URL("../src-tauri/Cargo.toml", import.meta.url);
+const workspacePackages = new Set();
+for (const manifest of [appManifest, ...crateManifests]) {
+  const packageTable = readFileSync(manifest, "utf8")
+    .split(/(?=^\[)/m)
+    .find(table => /^\[package\]\s*$/m.test(table)) ?? "";
+  if (!/^version\.workspace\s*=\s*true\s*(?:#.*)?$/m.test(packageTable)) continue;
+  const name = packageTable.match(/^name\s*=\s*"([^"]+)"\s*(?:#.*)?$/m)?.[1];
+  if (!name || workspacePackages.has(name)) throw new Error(`Invalid workspace package name in ${fileURLToPath(manifest)}`);
+  workspacePackages.add(name);
+}
+
+const cargoManifest = new URL("../Cargo.toml", import.meta.url);
+const workspaceVersion = /^(\[workspace\.package\][\s\S]*?^version\s*=\s*)"([^"]+)"/m;
+const currentVersion = readFileSync(cargoManifest, "utf8").match(workspaceVersion)?.[2];
+if (!currentVersion) throw new Error("Missing workspace package version");
+
 const updates = new Map();
 function update(file, transform) {
   const path = new URL(`../${file}`, import.meta.url);
@@ -38,16 +61,12 @@ for (const file of ["package.json", "src-tauri/tauri.conf.json"]) {
     return JSON.stringify(json, null, 2) + "\n";
   });
 }
-update("Cargo.toml", text => {
-  const pattern = /(\[workspace\.package\][\s\S]*?^version\s*=\s*)"[^"]+"/m;
-  if (!pattern.test(text)) throw new Error("Missing workspace package version");
-  return text.replace(pattern, `$1"${version}"`);
-});
-// Registry/git packages have a source field. Only workspace packages inherit
-// our version; leave third-party packages (including other 0.x versions) alone.
+update("Cargo.toml", text => text.replace(workspaceVersion, `$1"${version}"`));
 update("Cargo.lock", text => text.split(/(?=^\[\[package\]\])/m).map(block => {
-  if (!block.startsWith("[[package]]") || /^source\s*=/m.test(block)) return block;
-  return block.replace(/^version = "[^"]+"/m, `version = "${version}"`);
+  const name = block.match(/^name = "([^"]+)"/m)?.[1];
+  if (!block.startsWith("[[package]]") || !workspacePackages.has(name) || /^source\s*=/m.test(block)) return block;
+  return block.replace(/^version = "([^"]+)"/m, (line, lockedVersion) =>
+    lockedVersion === currentVersion ? `version = "${version}"` : line);
 }).join(""));
 for (const [path, text] of updates) writeFileSync(path, text);
 console.log(`Version ${version}${updates.size ? ` (${updates.size} files updated)` : " (unchanged)"}`);
