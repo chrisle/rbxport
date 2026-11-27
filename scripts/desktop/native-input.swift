@@ -130,6 +130,30 @@ guard wait({ item = selected(finderWindow,names:files.flatMap { [$0.lastPathComp
 guard let appOrigin = point(appWindow,kAXPositionAttribute), let finalSize = size(appWindow) else { fail("Cannot read test window bounds") }
 let start = CGPoint(x:origin.x+min(itemSize.width/2,150),y:origin.y+itemSize.height/2)
 let destination = CGPoint(x: appOrigin.x+x, y:appOrigin.y+finalSize.height-viewport+y)
+let finderPosition = point(finderWindow,kAXPositionAttribute)
+let finderSize = size(finderWindow)
+let visibleWindows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+func windowAt(_ screenPoint: CGPoint) -> String {
+    for window in visibleWindows where window[kCGWindowLayer as String] as? Int == 0 {
+        guard let bounds = window[kCGWindowBounds as String] as? [String: Any],
+              let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary), frame.contains(screenPoint),
+              let owner = window[kCGWindowOwnerPID as String] as? Int32 else { continue }
+        if owner == pid { return "rbxport" }
+        if owner == finder.processIdentifier { return "finder" }
+        return "other"
+    }
+    return "none"
+}
+let startLayer0Owner = windowAt(start)
+let destinationLayer0Owner = windowAt(destination)
+var sourceHit: AXUIElement?
+var sourceHitStatus: Int32? = nil
+if startLayer0Owner == "finder" {
+    sourceHitStatus = AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(start.x), Float(start.y), &sourceHit).rawValue
+}
+let selectedRole = attribute(item,kAXRoleAttribute) as? String ?? ""
+let sourceHitRole = sourceHit.flatMap { attribute($0,kAXRoleAttribute) as? String } ?? ""
+let sourceHitIsExactSelectedElement = sourceHit.map { CFEqual($0,item) } ?? false
 mouse(.mouseMoved,start); Thread.sleep(forTimeInterval:0.15)
 mouse(.leftMouseDown,start); Thread.sleep(forTimeInterval:0.2)
 for step in 1...45 {
@@ -146,4 +170,18 @@ if cancel {
 }
 mouse(.leftMouseUp,destination)
 Thread.sleep(forTimeInterval:0.7)
-print("{\"nativeDrag\":true,\"cancelled\":\(cancel),\"files\":\(files.count)}")
+let evidence: [String: Any] = [
+    "nativeDrag": true, "cancelled": cancel, "files": files.count,
+    "finderWindowReused": reused,
+    "start": ["x": start.x, "y": start.y],
+    "destination": ["x": destination.x, "y": destination.y],
+    "preDragStartLayer0Owner": startLayer0Owner, "preDragDestinationLayer0Owner": destinationLayer0Owner,
+    "selectedRole": selectedRole, "sourceHitRole": sourceHitRole,
+    "sourceHitStatus": sourceHitStatus.map { $0 as Any } ?? NSNull(),
+    "sourceHitIsExactSelectedElement": sourceHitIsExactSelectedElement,
+    "finderWindowPosition": finderPosition.map { ["x": $0.x, "y": $0.y] } ?? [:],
+    "finderWindowSize": finderSize.map { ["width": $0.width, "height": $0.height] } ?? [:],
+]
+guard let encoded = try? JSONSerialization.data(withJSONObject: evidence),
+      let output = String(data: encoded, encoding: .utf8) else { fail("Cannot encode native drag evidence") }
+print(output)

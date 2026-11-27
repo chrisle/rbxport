@@ -37,12 +37,28 @@ export async function expanded(c) {
     command(native,['--layout',String(c.pid())],{timeout:30000});
     await until(()=>state('innerWidth===1200 && innerHeight===800'),'fixed 1200 × 800 viewport');
     await state(`(() => { window.__desktopDrops=[];window.__desktopDrags=[];window.__desktopDragListener ??= e=>window.__desktopDrags.push({trusted:e.isTrusted,types:[...e.dataTransfer.types]});document.removeEventListener('dragenter',window.__desktopDragListener,true);document.addEventListener('dragenter',window.__desktopDragListener,true); window.__desktopDropListener ??= e=>window.__desktopDrops.push({trusted:e.isTrusted,names:[...e.dataTransfer.files].map(f=>f.name),types:[...e.dataTransfer.types]}); document.removeEventListener('drop',window.__desktopDropListener,true); document.addEventListener('drop',window.__desktopDropListener,true);return true;})()`);
-    const at = await state(`(() => {const el=[...document.querySelectorAll(${JSON.stringify(targetSelector)})].find(e=>${text===undefined?'true':`e.textContent.includes(${JSON.stringify(text)})`}); if(!el)throw Error('Missing native drop target'); const r=el.getBoundingClientRect(); return {x:r.x+r.width*.65,y:r.y+Math.min(r.height*.65,300),height:innerHeight};})()`);
-    const evidence = JSON.parse(command(native,[String(c.pid()),String(at.x),String(at.y),String(at.height),...files,...(cancel?['--cancel']:[])],{timeout:30000}));
+    const at = await state(`(() => {
+      const el = [...document.querySelectorAll(${JSON.stringify(targetSelector)})].find(e => ${text === undefined ? 'true' : `e.textContent.includes(${JSON.stringify(text)})`});
+      if (!el) throw Error('Missing native drop target');
+      const bounds = el.getBoundingClientRect();
+      const x = bounds.x + bounds.width * .65;
+      const y = bounds.y + Math.min(bounds.height * .65, 300);
+      const hit = document.elementFromPoint(x, y);
+      return {x, y, height: innerHeight, bounds: bounds.toJSON(), hit: hit?.tagName, hitTarget: el.contains(hit)};
+    })()`);
+    const artifact = path.join(out, `native-drop-${c.resultCount()}.json`);
+    const details = {files, targetSelector, text, at};
+    let evidence;
+    try {
+      evidence = JSON.parse(command(native,[String(c.pid()),String(at.x),String(at.y),String(at.height),...files,...(cancel?['--cancel']:[])],{timeout:30000}));
+    } catch (error) {
+      writeFileSync(artifact, JSON.stringify({...details, helperError: String(error)}, null, 2));
+      throw error;
+    }
     const drops=await state('window.__desktopDrops');
     const drags=await state('window.__desktopDrags');
+    writeFileSync(artifact, JSON.stringify({...details, evidence, drags, drops}, null, 2));
     assert.ok(drags.some(e=>e.trusted && e.types.includes('Files')),'A trusted native file drag must enter the test window');
-    writeFileSync(path.join(out,`native-drop-${c.resultCount()}.json`),JSON.stringify({files,targetSelector,text,evidence,drags,drops},null,2));
     if(cancel) assert.equal(drops.length,0,'Cancelled drag must not reach a drop handler');
     else if(ignored) {assert.ok(drops.length<=1);if(drops.length)assert.equal(drops[0].trusted,true);}
     else { assert.equal(drops.length,1,'OS must deliver exactly one drop'); assert.equal(drops[0].trusted,true,'OS drop must be trusted'); assert.ok(drops[0].types.includes('Files')); }
