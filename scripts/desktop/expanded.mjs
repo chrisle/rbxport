@@ -55,8 +55,8 @@ export async function expanded(c) {
       writeFileSync(artifact, JSON.stringify({...details, helperError: String(error)}, null, 2));
       throw error;
     }
-    const drops=await state('window.__desktopDrops');
-    const drags=await state('window.__desktopDrags');
+    writeFileSync(artifact, JSON.stringify({...details, evidence}, null, 2));
+    const {drags, drops} = await state('({drags: window.__desktopDrags, drops: window.__desktopDrops})');
     writeFileSync(artifact, JSON.stringify({...details, evidence, drags, drops}, null, 2));
     assert.equal(evidence.nativeDrag, true, 'Native drag points must fall on Finder and the test window');
     assert.ok(drags.some(e=>e.trusted && e.types.includes('Files')),'A trusted native file drag must enter the test window');
