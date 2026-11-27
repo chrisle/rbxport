@@ -1099,6 +1099,25 @@ mod tests {
         seams.windows(2).map(|pair| pair[1] - pair[0]).collect()
     }
 
+    /// #843: a seek past the end of the file ends the track, as playing to
+    /// the end does; it is not a file the deck cannot read. Before this the
+    /// demuxer's refusal went out as a deck error, which the interface takes
+    /// as the load having failed, and the deck could no longer be played.
+    /// The rig's event sink fails the test on any deck error.
+    #[test]
+    fn a_seek_past_the_end_ends_the_track_rather_than_failing_the_load() {
+        let mut rig = Rig::new(1.0, false);
+        rig.worker.handle(Command::Seek(TOTAL + 44_100));
+        assert_eq!(rig.clock.position(), TOTAL, "the head is at the end");
+        assert!(!rig.worker.produce(), "nothing to play past the end");
+        assert!(rig.clock.end_of_stream());
+        // PLAY on a deck that has ended seeks to 0, and it plays again.
+        rig.worker.handle(Command::Seek(0));
+        assert!(!rig.clock.end_of_stream());
+        let render = rig.render(BLOCK_FRAMES);
+        assert!(render.frames.first().is_some_and(|&frame| frame.abs() < 0.01), "plays from the top: {:?}", render.frames.first());
+    }
+
     #[test]
     fn saved_active_loop_catches_exactly_at_in_without_seeking() {
         let mut rig = Rig::new(1.0, false);

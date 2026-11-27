@@ -231,6 +231,9 @@ impl Streamer {
     /// to 576 frames early, a compressed format further — so whatever it
     /// overshoots by is decoded and thrown away. A cue point that is 7 ms out
     /// is a cue point in the wrong place.
+    ///
+    /// A frame at or past the end of the file lands at the end, finished, as
+    /// a track that played out is; it is not an error.
     pub fn seek(&mut self, track_frame: u64) -> Result<u64> {
         // Inside a positive lead the decoder starts at its first frame, after
         // the silence still to come; otherwise the decoder's own frame.
@@ -248,16 +251,13 @@ impl Streamer {
         // the discard below only moves forward. So an overshoot is stepped
         // back from, and a format that still overshoots after that pays for
         // the accurate seek rather than being played from the wrong place.
-        let mut landed = self.seek_to(seconds, self.seek_mode)?;
-        for back in BACKOFF_SECONDS {
-            if self.landed_frame(&landed) <= frame {
-                break;
-            }
-            landed = self.seek_to((seconds - back).max(0.0), SeekMode::Coarse)?;
-        }
-        if self.landed_frame(&landed) > frame {
-            landed = self.seek_to(seconds, SeekMode::Accurate)?;
-        }
+        let landed = match self.seek_landing(seconds, frame) {
+            Ok(landed) => Some(landed),
+            // A known end distinguishes an ordinary end seek from an
+            // unexpectedly short read while seeking inside the file.
+            Err(error) if self.total_frames > 0 && frame >= self.total_frames && past_the_end(&error) => None,
+            Err(error) => return Err(DeckError::Decode(error.to_string())),
+        };
 
         self.decoder.reset();
         for channel in &mut self.pending {
@@ -268,11 +268,20 @@ impl Streamer {
         }
         self.ready.clear();
         self.taken = 0;
-        self.drained = false;
-        self.finished = false;
         if let Some(resampler) = self.resampler.as_mut() {
             resampler.reset();
         }
+        let Some(landed) = landed else {
+            // Keep the track loaded and let the next seek play it again.
+            self.drained = true;
+            self.finished = true;
+            self.position = self.total_frames;
+            self.skip = 0;
+            self.silence = 0;
+            return Ok(self.position());
+        };
+        self.drained = false;
+        self.finished = false;
         self.position = scale_frames(landed.actual_ts, self.source_rate, self.device_rate);
         self.skip = frame.saturating_sub(self.position);
         self.silence = silence;
@@ -281,17 +290,25 @@ impl Streamer {
         Ok(track_frame.max(self.position()))
     }
 
-    /// One demuxer seek, in seconds.
-    fn seek_to(&mut self, seconds: f64, mode: SeekMode) -> Result<SeekedTo> {
-        self.format
-            .seek(
-                mode,
-                SeekTo::Time {
-                    time: Time::from(seconds),
-                    track_id: Some(self.track_id),
-                },
-            )
-            .map_err(|e| DeckError::Decode(e.to_string()))
+    fn seek_landing(&mut self, seconds: f64, frame: u64) -> symphonia::core::errors::Result<SeekedTo> {
+        let mut landed = self.seek_to(seconds, self.seek_mode)?;
+        for back in BACKOFF_SECONDS {
+            if self.landed_frame(&landed) <= frame {
+                break;
+            }
+            landed = self.seek_to((seconds - back).max(0.0), SeekMode::Coarse)?;
+        }
+        if self.landed_frame(&landed) > frame {
+            landed = self.seek_to(seconds, SeekMode::Accurate)?;
+        }
+        Ok(landed)
+    }
+
+    fn seek_to(&mut self, seconds: f64, mode: SeekMode) -> symphonia::core::errors::Result<SeekedTo> {
+        self.format.seek(
+            mode,
+            SeekTo::Time { time: Time::from(seconds), track_id: Some(self.track_id) },
+        )
     }
 
     /// Where a seek landed, in the device-rate frames the playhead counts.
@@ -571,6 +588,17 @@ impl Streamer {
             self.ready.push(right);
         }
     }
+}
+
+/// Whether a demuxer refused a seek because the file ends before the place
+/// asked for. Each format says so in its own way: MP3 finds a timestamp by
+/// scanning its frames up to it, and for one past the last frame that scan
+/// runs out of file, an end-of-stream read; WAV, AIFF, FLAC and MP4 check the
+/// timestamp against the length they declare and call it out of range.
+fn past_the_end(error: &symphonia::core::errors::Error) -> bool {
+    use symphonia::core::errors::{Error, SeekErrorKind};
+    matches!(error, Error::SeekError(SeekErrorKind::OutOfRange))
+        || matches!(error, Error::IoError(e) if e.kind() == std::io::ErrorKind::UnexpectedEof)
 }
 
 /// A frame count from one rate into another, without overflowing on a long mix.
@@ -965,7 +993,12 @@ mod tests {
         tone(&path, 44_100, 0.2);
 
         let mut streamer = Streamer::open(&path, 44_100).unwrap();
-        let _ = streamer.seek(44_100 * 10);
+        // The end of the track, not a file that cannot be read: the WAV
+        // demuxer refuses a timestamp past the length it declares, and the
+        // deck used to pass that refusal on as "unsupported or unreadable
+        // audio" (#843).
+        let landed = streamer.seek(44_100 * 10).expect("a seek past the end lands at the end");
+        assert_eq!(landed, streamer.total_frames());
         let mut out = vec![0.0_f32; 512];
         let mut guard = 0;
         while !streamer.finished() && guard < 100 {
@@ -973,6 +1006,32 @@ mod tests {
             guard += 1;
         }
         assert!(streamer.finished(), "a seek past the end never finished");
+    }
+
+    /// #843: a seek to or past the end of an MP3 is the end of the track, as
+    /// it is for a WAV, not a file that cannot be read. symphonia's MP3
+    /// demuxer finds a timestamp by scanning the frames up to it, and for one
+    /// past the last frame that scan runs out of file. The deck passed that
+    /// on as "unsupported or unreadable audio: end of stream", and the
+    /// interface takes a deck error for a failed load and drops the track.
+    #[test]
+    fn a_seek_to_or_past_the_end_of_an_mp3_ends_the_track_rather_than_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mp3 = lame_mp3(dir.path());
+        let mut streamer = Streamer::open(&mp3, 44_100).unwrap();
+        let total = streamer.total_frames();
+        assert!(total > 0);
+        for at in [total, total + 1, total + 44_100 * 10] {
+            let landed = streamer.seek(at).unwrap_or_else(|e| panic!("a seek to {at} of {total} failed: {e}"));
+            assert_eq!(landed, total, "a seek to {at} lands at the end");
+            let mut out = vec![0.0_f32; 1024];
+            assert_eq!(streamer.fill(&mut out).unwrap(), 0, "nothing is played past the end");
+            assert!(streamer.finished(), "a seek to {at} leaves the track finished");
+        }
+        // PLAY on a deck that has ended seeks to 0: the whole file plays again.
+        assert_eq!(streamer.seek(0).unwrap(), 0);
+        assert!(!streamer.finished());
+        assert_eq!(drain(&mut streamer).len(), total as usize * 2);
     }
 
     #[test]
