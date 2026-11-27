@@ -2460,6 +2460,8 @@ fn sync_error(e: &rbl_export::ExportError) -> AppError {
             ErrorKind::ReadOnly,
             "Not enough space available on the device",
         ).with_detail(format!("({io})")),
+        rbl_export::ExportError::Io(io) if media_failed(io) => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
+            .with_detail(format!("({io})")),
         _ if export_media_failed(e) => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
             .with_detail(format!("({e})")),
         _ => AppError::new(ErrorKind::Internal, e.to_string()),
@@ -2469,16 +2471,16 @@ fn sync_error(e: &rbl_export::ExportError) -> AppError {
 fn export_media_failed(error: &rbl_export::ExportError) -> bool {
     use rbl_export::{ExportError, PublicationError};
     match error {
-        ExportError::Io(io) => media_failed(io),
+        ExportError::Io(io) => media_failure_source(io),
         // The exporter also uses this for a read or write failure on media
         // that is still mounted. The caller checks for a disconnected USB.
         ExportError::DeviceGone => true,
         ExportError::Publication(error) => match error {
             PublicationError::CommitRecoveryRequired { cause, rollback } => {
-                media_failed(cause) || media_failed(rollback)
+                media_failure_source(cause) || media_failure_source(rollback)
             }
             PublicationError::VerificationRecoveryRequired { cause, rollback } => {
-                export_media_failed(cause) || media_failed(rollback)
+                export_media_failed(cause) || media_failure_source(rollback)
             }
             PublicationError::PreviousLibraryRestored(cause) => export_media_failed(cause),
         },
@@ -2496,31 +2498,46 @@ const MEDIA_FAILED: &str = "An error occurred while exporting: the USB drive cou
     The drive may be failing, or it lost power for a moment. Copy anything you need off it and check it with \
     Disk Utility First Aid (Mac) or Error checking (Windows) before syncing to it again.";
 
-/// Whether the operating system reported that the drive failed a read or
-/// write: EIO on macOS and Linux, and on Windows a CRC (data) error, an I/O
-/// device error, or a hardware error. Context added on the way up
-/// (`Could not write …: …`) and `tempfile`'s path wrapper keep the
-/// operating system's own text but drop its code, so that text is checked
-/// too.
-fn media_failed(error: &std::io::Error) -> bool {
-    #[cfg(unix)]
-    // EIO, the same number on macOS and Linux.
-    const CODES: &[i32] = &[5];
-    #[cfg(windows)]
-    // ERROR_CRC, ERROR_DEVICE_HARDWARE_ERROR, ERROR_IO_DEVICE.
-    const CODES: &[i32] = &[23, 483, 1117];
-    #[cfg(not(any(unix, windows)))]
-    const CODES: &[i32] = &[];
-    if error.raw_os_error().is_some_and(|code| CODES.contains(&code)) {
-        return true;
-    }
-    let mut source: Option<&(dyn std::error::Error + 'static)> = error.get_ref().map(|inner| inner as _);
+#[cfg(unix)]
+const MEDIA_FAILURE_CODES: &[i32] = &[5];
+#[cfg(windows)]
+const MEDIA_FAILURE_CODES: &[i32] = &[23, 483, 1117];
+#[cfg(not(any(unix, windows)))]
+const MEDIA_FAILURE_CODES: &[i32] = &[];
+
+/// EIO on Unix, or CRC, device hardware and I/O device errors on Windows.
+/// Recovery errors may contain arbitrary file names, so check the actual
+/// error sources and the narrowly formatted tempfile error.
+fn media_failure_source(error: &std::io::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(inner) = source {
-        if inner.downcast_ref::<std::io::Error>().and_then(std::io::Error::raw_os_error).is_some_and(|code| CODES.contains(&code)) {
-            return true;
+        if let Some(io) = inner.downcast_ref::<std::io::Error>() {
+            if io.raw_os_error().is_some_and(|code| MEDIA_FAILURE_CODES.contains(&code)) {
+                return true;
+            }
+            source = io.get_ref().map(|inner| inner as _);
+        } else {
+            source = inner.source();
+            // tempfile's opaque leaf exposes the OS error only at the
+            // start of "<OS error> at path <quoted path>". Never scan the path.
+            if source.is_none() {
+                let text = inner.to_string();
+                if MEDIA_FAILURE_CODES.iter().any(|&code| {
+                    let os_error = std::io::Error::from_raw_os_error(code).to_string();
+                    text.strip_prefix(&os_error)
+                        .is_some_and(|tail| tail.starts_with(" at path \"") && tail.ends_with('"'))
+                }) {
+                    return true;
+                }
+            }
         }
-        source = inner.source();
     }
+    false
+}
+
+/// Older export errors may have only the OS text after losing their source.
+fn media_failed(error: &std::io::Error) -> bool {
+    if media_failure_source(error) { return true; }
     // A filename can contain an OS-looking code. When the actual I/O kind
     // says this is a collision, permission or other definite non-media
     // failure, do not let that path turn the text fallback into evidence.
@@ -2531,7 +2548,7 @@ fn media_failed(error: &std::io::Error) -> bool {
         return false;
     }
     let text = error.to_string();
-    CODES.iter().any(|code| text.contains(&format!("(os error {code})")))
+    MEDIA_FAILURE_CODES.iter().any(|code| text.contains(&format!("(os error {code})")))
 }
 
 #[allow(clippy::too_many_arguments, reason = "export options and independent progress/cancellation callbacks")]
@@ -5465,11 +5482,13 @@ mod tests {
         #[cfg(windows)]
         let media_code = 1117;
         let media = || Error::from_raw_os_error(media_code);
+        let tempfile_error = || Error::new(media().kind(), format!("{} at path \"fixture\"", media()));
         let conflict = || ExportError::Conflict(format!("Database disagrees with Track (os error {media_code})"));
         let permission = || Error::new(std::io::ErrorKind::PermissionDenied, "could not write the rollback marker");
         for failure in [
             PublicationError::CommitRecoveryRequired { cause: media(), rollback: permission() },
             PublicationError::VerificationRecoveryRequired { cause: Box::new(conflict()), rollback: media() },
+            PublicationError::VerificationRecoveryRequired { cause: Box::new(conflict()), rollback: tempfile_error() },
             PublicationError::PreviousLibraryRestored(Box::new(media().into())),
         ] {
             let failure = ExportError::from(failure);
@@ -5489,6 +5508,30 @@ mod tests {
             assert_eq!(device_error.kind, crate::error::ErrorKind::Malformed);
             assert_eq!(device_error.message, expected_device_message);
         }
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn publication_conflict_with_an_os_code_in_the_path_is_not_media_failure() {
+        use rbl_core::durable::{self, Publication};
+        use rbl_export::{ExportError, PublicationError};
+
+        #[cfg(unix)]
+        let media_code = 5;
+        #[cfg(windows)]
+        let media_code = 1117;
+        let root = tempfile::tempdir().unwrap();
+        let path = std::path::PathBuf::from(format!("Track (os error {media_code})"));
+        std::fs::create_dir(root.path().join(&path)).unwrap();
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        durable::write(&publication.stage().join(&path), b"test image").unwrap();
+        let cause = publication.commit_retained(&[path]).unwrap_err();
+        assert!(cause.to_string().contains(&format!("Publication target is a directory: Track (os error {media_code})")));
+        let failure = ExportError::from(PublicationError::CommitRecoveryRequired {
+            cause,
+            rollback: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "could not write the rollback marker"),
+        });
+        assert_eq!(super::sync_error(&failure).message, failure.to_string());
     }
 
     /// A track whose analysis folder is gone from disk is exported without

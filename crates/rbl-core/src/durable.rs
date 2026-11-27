@@ -197,9 +197,17 @@ pub fn remove_tree(path: &Path) -> std::io::Result<()> {
     gone(in_stored_form(path, |p| std::fs::remove_dir(p)), path)
 }
 
-/// An I/O error that says what was being done to which file.
+#[derive(Debug, thiserror::Error)]
+#[error("Could not {action} {path}: {source}")]
+struct PathIoError {
+    action: &'static str,
+    path: PathBuf,
+    source: std::io::Error,
+}
+
+/// Name the affected file while preserving the underlying OS error.
 fn at<'a>(action: &'static str, path: &'a Path) -> impl FnOnce(std::io::Error) -> std::io::Error + 'a {
-    move |error| std::io::Error::new(error.kind(), format!("Could not {action} {}: {error}", path.display()))
+    move |source| std::io::Error::new(source.kind(), PathIoError { action, path: path.to_owned(), source })
 }
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -1108,7 +1116,7 @@ impl Publication {
                 if error.to_string().contains(&*entry.path.to_string_lossy()) {
                     error
                 } else {
-                    std::io::Error::new(error.kind(), format!("Could not publish {}: {error}", entry.path.display()))
+                    at("publish", &entry.path)(error)
                 }
             })?;
         }
@@ -1584,6 +1592,18 @@ mod tests {
         let error = flush_with(&file, |_| Err(std::io::Error::from_raw_os_error(5))).unwrap_err();
         assert_eq!(error.raw_os_error(), Some(5));
         flush(&file).unwrap();
+    }
+
+    #[test]
+    fn publication_context_retains_the_os_error_as_its_source() {
+        let original = std::io::Error::from_raw_os_error(5);
+        let message = format!("Could not flush device image: {original}");
+        let kind = original.kind();
+        let contextual = at("flush", Path::new("device image"))(original);
+        assert_eq!(contextual.kind(), kind);
+        assert_eq!(contextual.to_string(), message);
+        let source = std::error::Error::source(&contextual).unwrap();
+        assert_eq!(source.downcast_ref::<std::io::Error>().unwrap().raw_os_error(), Some(5));
     }
 
     #[cfg(target_os = "macos")]
