@@ -242,6 +242,7 @@ function changed(): void {
 function sameList(a: ListMenuState | undefined, b: ListMenuState | undefined): boolean {
   if (a === undefined || b === undefined) return a === b;
   return a.source === b.source && a.selected === b.selected && a.loose === b.loose &&
+    a.anyAnalysisLocked === b.anyAnalysisLocked &&
     a.playlists === b.playlists && a.devices === b.devices && a.busy === b.busy &&
     a.rows.length === b.rows.length && a.rows.every((row, i) => row.missing === b.rows[i]?.missing);
 }

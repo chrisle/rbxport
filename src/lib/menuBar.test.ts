@@ -209,7 +209,21 @@ describe("menuBarEnabled", () => {
 describe("menu bar state", () => {
   afterEach(() => {
     publishListMenuState("main", null);
+    publishListMenuState("sub", null);
     publishTreeMenuState("main", null);
+  });
+
+  it.each(["main", "sub"] as const)("updates Analysis Lock Off for a new lock result in the %s list", (side) => {
+    const focus = { pane: "list", side } as const;
+    const state: ListMenuState = { source: "playlist", selected: 1, rows: [{ missing: false }], loose: false };
+    const enabled = () => menuBarEnabled({ focus, ...menuBarState(), has: () => true })["analysis-lock-off"];
+
+    publishListMenuState(side, state);
+    expect(enabled()).toBe(false);
+    publishListMenuState(side, { ...state, anyAnalysisLocked: true });
+    expect(enabled()).toBe(true);
+    publishListMenuState(side, { ...state, anyAnalysisLocked: false });
+    expect(enabled()).toBe(false);
   });
 
   it("tells its listeners only when a report changes", () => {
