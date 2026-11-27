@@ -1440,6 +1440,7 @@
   "Waiting for USB activity to finish, then importing {kind} from {device}…": "Venter på, at USB-aktivitet afsluttes, og importerer derefter {kind} fra {device}...",
   "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
   "{device}: imported {count} play-history entries.": "{device}: imported {count} play-history entries.",
+  "{device}: History ‘{history}’ was left on the USB because the selected USB database has invalid play positions.": "{device}: Historikken »{history}« blev efterladt på USB-enheden, fordi den valgte USB-database indeholder ugyldige afspilningspositioner.",
   "{device}: no new play-history entries.": "{device}: no new play-history entries.",
   "{device}: imported {count} track rating.": "{device}: imported {count} track rating.",
   "{device}: imported {count} track ratings.": "{device}: imported {count} track ratings.",

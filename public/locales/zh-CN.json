@@ -1450,6 +1450,7 @@
   "Waiting for USB activity to finish, then importing {kind} from {device}…": "等待 USB 活动完成，然后从 {kind} 导入 {device}...",
   "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
   "{device}: imported {count} play-history entries.": "{device}: imported {count} play-history entries.",
+  "{device}: History ‘{history}’ was left on the USB because the selected USB database has invalid play positions.": "{device}：历史记录“{history}”已保留在 USB 设备上，因为所选 USB 数据库包含无效的播放位置。",
   "{device}: no new play-history entries.": "{device}: no new play-history entries.",
   "{device}: imported {count} track rating.": "{device}: imported {count} track rating.",
   "{device}: imported {count} track ratings.": "{device}: imported {count} track ratings.",

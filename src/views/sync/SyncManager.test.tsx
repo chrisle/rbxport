@@ -1187,6 +1187,20 @@ it("imports history explicitly and offers details and retry after a failure", as
   expect(importUsb).toHaveBeenLastCalledWith("/Volumes/USB A", false, true, false, false);
 });
 
+it("names a USB history skipped for ambiguous play order", async () => {
+  await renderWith({ importButtonCues: false, importButtonHistory: true, importButtonSettings: false });
+  click(box("USB A"));
+  await settle();
+  importUsb.mockResolvedValueOnce({
+    tracks: 0, histories: 2, settings: 0, ratings: 0, skipped: 3,
+    ambiguousHistoryOrder: ["Damaged history"],
+  });
+  click(importButton());
+  await settle();
+  expect(status()).toContain("USB A: imported 2 play-history entries.");
+  expect(status()).toContain("USB A: History ‘Damaged history’ was left on the USB because the selected USB database has invalid play positions.");
+});
+
 it("reports cleared ratings and a stick with no rating changes", async () => {
   await renderWith({ importButtonCues: false, importButtonHistory: false, importButtonSettings: false, importButtonRatings: true });
   click(box("USB A"));

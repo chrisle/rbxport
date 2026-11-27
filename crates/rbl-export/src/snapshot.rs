@@ -51,6 +51,62 @@ pub struct History {
     pub sequence: i64,
     pub tracks: Vec<u32>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryFormat {
+    OneLibrary,
+    DeviceLibrary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryPlay {
+    pub ordinal: Option<i64>,
+    pub content_id: u32,
+}
+
+/// The session ID and play positions read from a single database. These
+/// values describe this snapshot and may be reused by a player later.
+#[derive(Debug, PartialEq, Eq)]
+pub struct HistorySource {
+    pub format: HistoryFormat,
+    pub session_id: i64,
+    pub plays: Vec<HistoryPlay>,
+}
+
+impl HistorySource {
+    #[must_use]
+    pub fn has_ordered_ordinals(&self) -> bool {
+        self.plays.iter().all(|play| play.ordinal.is_some_and(|n| n >= 0))
+            && self.plays.windows(2).all(|pair| pair[0].ordinal < pair[1].ordinal)
+    }
+}
+
+/// One merged history with the on-media evidence retained. `source` supplies
+/// the merged order. `aliases` records the name-and-track grouping for this
+/// snapshot only. `history.id` may differ from `session_id` after a collision.
+#[derive(Debug, PartialEq, Eq)]
+pub struct HistoryImport {
+    pub history: History,
+    pub source: HistorySource,
+    pub aliases: Vec<HistorySource>,
+}
+
+struct ReadHistory {
+    history: History,
+    sources: Vec<HistorySource>,
+}
+
+impl ReadHistory {
+    fn new(mut history: History, format: HistoryFormat, plays: Vec<HistoryPlay>, preserve_sources: bool) -> Self {
+        history.tracks = plays.iter().map(|play| play.content_id).collect();
+        let sources = if preserve_sources {
+            vec![HistorySource { format, session_id: history.id, plays }]
+        } else {
+            Vec::new()
+        };
+        Self { history, sources }
+    }
+}
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub legacy: Option<Library>,
@@ -119,34 +175,53 @@ impl Snapshot {
         Self::read_at(root, crate::export_root_name(root)?)
     }
     pub fn read_at(root: &Path, name: &str) -> Result<Self> {
+        let (mut snapshot, histories) = Self::read_with_history(root, name, false)?;
+        snapshot.history = histories.into_iter().map(|entry| entry.history).collect();
+        Ok(snapshot)
+    }
+
+    pub fn read_history_import(root: &Path) -> Result<Vec<HistoryImport>> {
+        let (_, histories) = Self::read_with_history(root, crate::export_root_name(root)?, true)?;
+        Ok(histories.into_iter().filter(|entry| !entry.history.folder).filter_map(|entry| {
+            let mut sources = entry.sources.into_iter();
+            Some(HistoryImport { history: entry.history, source: sources.next()?, aliases: sources.collect() })
+        }).collect())
+    }
+
+    fn read_with_history(root: &Path, name: &str, preserve_sources: bool) -> Result<(Self, Vec<ReadHistory>)> {
         let dir = root.join(name).join("rekordbox");
         let mut out = Self::default();
+        let mut legacy_history = Vec::new();
+        let mut history = Vec::new();
         let pdb = dir.join("export.pdb");
         if pdb.exists() {
-            read_legacy_into(&mut out, &pdb)?;
+            read_legacy_into(&mut out, &pdb, &mut legacy_history, preserve_sources)?;
         }
         let one = dir.join("exportLibrary.db");
         if one.exists() {
-            read_one_into(&mut out, &one)?;
+            read_one_into(&mut out, &one, &mut history, preserve_sources)?;
+        }
+        if !preserve_sources {
+            out.legacy_history = legacy_history.iter().map(|entry| entry.history.clone()).collect();
         }
         // Merge histories by full session contents. Equal numeric IDs alone
         // are insufficient when the stick was used by both generations of player.
-        for legacy in &out.legacy_history {
-            if out
-                .history
-                .iter()
-                .any(|h| h.name == legacy.name && h.tracks == legacy.tracks)
+        for mut legacy in legacy_history {
+            if let Some(existing) = history.iter_mut().find(|entry| {
+                entry.history.name == legacy.history.name && entry.history.tracks == legacy.history.tracks
+            })
             {
+                existing.sources.append(&mut legacy.sources);
                 continue;
             }
-            let mut h = legacy.clone();
-            if out.history.iter().any(|old| old.id == h.id) {
-                h.id = out.history.iter().map(|h| h.id).max().unwrap_or(0) + 1;
+            if history.iter().any(|entry| entry.history.id == legacy.history.id) {
+                legacy.history.id = history.iter().map(|entry| entry.history.id).max().unwrap_or(0)
+                    .checked_add(1).ok_or_else(|| ExportError::Conflict("USB history IDs exceed the database range.".into()))?;
             }
-            out.history.push(h);
+            history.push(legacy);
         }
-        out.history.sort_by_key(|h| h.id);
-        Ok(out)
+        history.sort_by_key(|entry| entry.history.id);
+        Ok((out, history))
     }
     pub fn merged_library(&self) -> Option<Library> {
         self.merged_library_above(0)
@@ -603,7 +678,7 @@ pub(crate) fn legacy_playlist_ids_with(legacy: &Library, one: &Library, floor: u
 }
 
 /// The legacy `export.pdb` side of [`Snapshot::read_at`].
-fn read_legacy_into(out: &mut Snapshot, pdb: &Path) -> Result<()> {
+fn read_legacy_into(out: &mut Snapshot, pdb: &Path, history: &mut Vec<ReadHistory>, preserve_sources: bool) -> Result<()> {
     use rbl_pdb::PageType;
     let bytes = std::fs::read(pdb)?;
     let parsed = rbl_pdb::Pdb::parse(&bytes)
@@ -678,21 +753,25 @@ fn read_legacy_into(out: &mut Snapshot, pdb: &Path) -> Result<()> {
     for h in parsed.played_histories() {
         let mut rows: Vec<_> = entries.iter().filter(|e| e.playlist_id == h.id).collect();
         rows.sort_by_key(|e| e.entry_index);
-        out.legacy_history.push(History {
+        let source = History {
             id: i64::from(h.id),
             name: h.name,
             parent: 0,
             folder: false,
             sequence: i64::from(h.id),
-            tracks: rows.iter().map(|e| e.track_id).collect(),
-        });
+            tracks: Vec::new(),
+        };
+        let plays = rows.into_iter().map(|e| HistoryPlay {
+            ordinal: Some(i64::from(e.entry_index)), content_id: e.track_id,
+        }).collect();
+        history.push(ReadHistory::new(source, HistoryFormat::DeviceLibrary, plays, preserve_sources));
     }
     library.normalize();
     out.legacy = Some(library);
     Ok(())
 }
 /// The `OneLibrary` (`exportLibrary.db`) side of [`Snapshot::read_at`].
-fn read_one_into(out: &mut Snapshot, path: &Path) -> Result<()> {
+fn read_one_into(out: &mut Snapshot, path: &Path, history: &mut Vec<ReadHistory>, preserve_sources: bool) -> Result<()> {
     let db = rbl_onelibrary::ExportLibrary::open_read_only(path).map_err(sql)?;
     let conn = db.connection();
     conn.execute_batch("BEGIN").map_err(sql)?;
@@ -723,7 +802,7 @@ fn read_one_into(out: &mut Snapshot, path: &Path) -> Result<()> {
         )));
     }
     read_one_library(&db, out)?;
-    read_one_history_and_tags(&db, out)?;
+    read_one_history_and_tags(&db, out, history, preserve_sources)?;
     Ok(())
 }
 
@@ -787,7 +866,7 @@ fn read_one_library(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> R
 }
 
 /// The play history, My Tags and cue fingerprints half of [`read_one_into`].
-fn read_one_history_and_tags(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> Result<()> {
+fn read_one_history_and_tags(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot, history: &mut Vec<ReadHistory>, preserve_sources: bool) -> Result<()> {
     use std::fmt::Write as _;
     let conn = db.connection();
     let mut q = conn.prepare("SELECT history_id, COALESCE(history_id_parent,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(sequenceNo,0) FROM history ORDER BY history_id").map_err(sql)?;
@@ -804,14 +883,14 @@ fn read_one_history_and_tags(db: &rbl_onelibrary::ExportLibrary, out: &mut Snaps
         })
         .map_err(sql)?;
     for h in histories {
-        let mut h = h.map_err(sql)?;
-        let mut q = conn.prepare("SELECT content_id FROM history_content WHERE history_id=?1 ORDER BY sequenceNo").map_err(sql)?;
-        h.tracks = q
-            .query_map([h.id], |r| r.get(0))
+        let h = h.map_err(sql)?;
+        let mut q = conn.prepare("SELECT content_id, CASE WHEN typeof(sequenceNo)='integer' THEN sequenceNo END FROM history_content WHERE history_id=?1 ORDER BY sequenceNo").map_err(sql)?;
+        let plays = q
+            .query_map([h.id], |r| Ok(HistoryPlay { content_id: r.get(0)?, ordinal: r.get(1)? }))
             .map_err(sql)?
             .collect::<std::result::Result<_, _>>()
             .map_err(sql)?;
-        out.history.push(h);
+        history.push(ReadHistory::new(h, HistoryFormat::OneLibrary, plays, preserve_sources));
     }
     let mut tags=conn.prepare("SELECT myTag_id, COALESCE(sequenceNo,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(myTag_id_parent,0) FROM myTag ORDER BY myTag_id").map_err(|error| read_error("myTag", error))?;
     out.my_tags = tags

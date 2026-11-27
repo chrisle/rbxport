@@ -1045,7 +1045,7 @@ export interface Backend {
    * back from a stick. `unchanged` counts tracks whose cues and grid already
    * match the library; they are not rewritten.
    */
-  importUsb(path: string, cues: boolean, history: boolean, settings: boolean, ratings: boolean): Promise<{ tracks: number; histories: number; settings: number; ratings: number; skipped: number; unchanged?: number; warnings?: string[] }>;
+  importUsb(path: string, cues: boolean, history: boolean, settings: boolean, ratings: boolean): Promise<{ tracks: number; histories: number; settings: number; ratings: number; skipped: number; unchanged?: number; warnings?: string[]; ambiguousHistoryOrder?: string[] }>;
 
   /**
    * An intelligent playlist's rule, for the editor; an empty "all" for a

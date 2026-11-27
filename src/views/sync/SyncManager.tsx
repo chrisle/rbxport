@@ -874,6 +874,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady, onOp
                   ? t("{device}: imported {count} CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.", { device: device.name, count: result.settings })
                   : t("{device}: no CDJ/mixer settings files found.", { device: device.name }));
               if (result.warnings?.length) results.push(...result.warnings.map(warning => `${device.name}: ${warning}`));
+              for (const history of result.ambiguousHistoryOrder ?? []) {
+                results.push(t("{device}: History ‘{history}’ was left on the USB because the selected USB database has invalid play positions.", { device: device.name, history }));
+              }
             } catch (e) {
               setImportFailed(true);
               results.push(`${device.name}: Couldn’t import ${noun}. ${errorMessage(e)}`);

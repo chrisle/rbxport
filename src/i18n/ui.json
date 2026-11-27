@@ -1706,6 +1706,7 @@
   "{device}: imported {count} CDJ/mixer settings files. Sync gives them to USB devices that have no settings of their own.",
   "{device}: imported {count} play-history entries.",
   "{device}: imported {count} play-history entry.",
+  "{device}: History ‘{history}’ was left on the USB because the selected USB database has invalid play positions.",
   "{device}: imported {count} track rating.",
   "{device}: imported {count} track ratings.",
   "{device}: no CDJ/mixer settings files found.",

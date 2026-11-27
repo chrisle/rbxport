@@ -1435,6 +1435,7 @@
   "Waiting for USB activity to finish, then importing {kind} from {device}…": "USB 활동이 완료되기를 기다리는 중입니다. 이후 {kind}에서 {device}을(를) 가져오는 중입니다…",
   "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
   "{device}: imported {count} play-history entries.": "{device}: imported {count} play-history entries.",
+  "{device}: History ‘{history}’ was left on the USB because the selected USB database has invalid play positions.": "{device}: 기록 ‘{history}’은 선택한 USB 데이터베이스에 잘못된 재생 위치가 있어 USB 장치에 그대로 두었습니다.",
   "{device}: no new play-history entries.": "{device}: no new play-history entries.",
   "{device}: imported {count} track rating.": "{device}: imported {count} track rating.",
   "{device}: imported {count} track ratings.": "{device}: imported {count} track ratings.",

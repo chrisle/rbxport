@@ -1449,6 +1449,7 @@
   "Waiting for USB activity to finish, then importing {kind} from {device}…": "Aguardando a conclusão da atividade USB e importando {kind} de {device}…",
   "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
   "{device}: imported {count} play-history entries.": "{device}: imported {count} play-history entries.",
+  "{device}: History ‘{history}’ was left on the USB because the selected USB database has invalid play positions.": "{device}: O histórico «{history}» foi deixado no dispositivo USB porque a base de dados USB selecionada contém posições de reprodução inválidas.",
   "{device}: no new play-history entries.": "{device}: no new play-history entries.",
   "{device}: imported {count} track rating.": "{device}: imported {count} track rating.",
   "{device}: imported {count} track ratings.": "{device}: imported {count} track ratings.",

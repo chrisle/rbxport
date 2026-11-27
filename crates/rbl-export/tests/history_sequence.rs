@@ -3,6 +3,65 @@
 use rbl_pdb::build::{device_sql_string, FileBuilder};
 
 #[test]
+fn history_import_keeps_legacy_ids_and_mirrored_positions() {
+    use rbl_export::snapshot::{HistoryFormat, HistoryPlay, Snapshot};
+
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("PIONEER/rekordbox");
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut file = FileBuilder::new(4096);
+    file.add_table(11, &[
+        rbl_pdb::rows::simple_named_row(7, "Legacy set"),
+        rbl_pdb::rows::simple_named_row(27, "Mirrored set"),
+    ]);
+    let rows = [(1_u32, 7_u32, 0_u16), (1, 7, 3), (2, 27, 2), (3, 27, 6)]
+        .map(|(track, history, sequence)| {
+            let mut row = track.to_le_bytes().to_vec();
+            row.extend_from_slice(&history.to_le_bytes());
+            row.extend_from_slice(&sequence.to_le_bytes());
+            row.extend_from_slice(&[1, 0]);
+            row
+        });
+    file.add_table(12, &rows);
+    std::fs::write(directory.join("export.pdb"), file.finish()).unwrap();
+
+    let path = directory.join("exportLibrary.db");
+    let mut one = rbl_onelibrary::build::Builder::create(&path).unwrap();
+    one.add_history(7, "OneLibrary set", 0, 1, false).unwrap();
+    one.add_history_track(7, 3, 1).unwrap();
+    one.add_history(8, "Mirrored set", 0, 2, false).unwrap();
+    one.add_history_track(8, 2, 1).unwrap();
+    one.add_history_track(8, 3, 3).unwrap();
+    one.finish("Fixture", "2026-11-26", 0).unwrap();
+
+    let play = |ordinal, content_id| HistoryPlay { ordinal: Some(ordinal), content_id };
+    let imports = Snapshot::read_history_import(root.path()).unwrap();
+    assert_eq!(imports.len(), 3);
+    assert_eq!(imports[0].source.format, HistoryFormat::OneLibrary);
+    assert_eq!(imports[0].source.session_id, 7);
+    let mirrored = &imports[1];
+    assert_eq!(mirrored.source.session_id, 8);
+    assert_eq!(mirrored.source.plays, [play(1, 2), play(3, 3)]);
+    assert_eq!(mirrored.aliases.len(), 1);
+    assert_eq!(mirrored.aliases[0].format, HistoryFormat::DeviceLibrary);
+    assert_eq!(mirrored.aliases[0].session_id, 27);
+    assert_eq!(mirrored.aliases[0].plays, [play(2, 2), play(6, 3)]);
+    let legacy = &imports[2];
+    assert_eq!(legacy.history.id, 9);
+    assert_eq!(legacy.source.format, HistoryFormat::DeviceLibrary);
+    assert_eq!(legacy.source.session_id, 7);
+    assert_eq!(legacy.source.plays, [play(0, 1), play(3, 1)]);
+
+    let db = rbl_onelibrary::playlists::open_read_write(&path).unwrap();
+    db.execute("INSERT INTO history VALUES (99, 9, 'Added later', 0, 0)", []).unwrap();
+    drop(db);
+    let updated = Snapshot::read_history_import(root.path()).unwrap();
+    assert_eq!(updated[3].history.id, 100);
+    assert_eq!(updated[3].source, legacy.source);
+    assert_eq!(Snapshot::read(root.path()).unwrap().legacy_history[0].id, 7);
+}
+
+#[test]
 fn mixed_on_air_flags_do_not_reorder_played_history() {
     let root = tempfile::tempdir().unwrap();
     let mut file = FileBuilder::new(4096);

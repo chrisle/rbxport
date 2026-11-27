@@ -1445,6 +1445,7 @@
   "Waiting for USB activity to finish, then importing {kind} from {device}…": "Várakozás az USB-tevékenység befejezésére, majd a(z) {kind} importálása a(z) {device} eszközről…",
   "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
   "{device}: imported {count} play-history entries.": "{device}: imported {count} play-history entries.",
+  "{device}: History ‘{history}’ was left on the USB because the selected USB database has invalid play positions.": "{device}: A(z) „{history}” előzmény az USB-eszközön maradt, mert a kiválasztott USB-adatbázis érvénytelen lejátszási pozíciókat tartalmaz.",
   "{device}: no new play-history entries.": "{device}: no new play-history entries.",
   "{device}: imported {count} track rating.": "{device}: imported {count} track rating.",
   "{device}: imported {count} track ratings.": "{device}: imported {count} track ratings.",

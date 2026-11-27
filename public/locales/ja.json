@@ -1454,6 +1454,7 @@
   "Waiting for USB activity to finish, then importing {kind} from {device}…": "USB アクティビティが完了するのを待ってから、{kind} から {device} をインポートしています…",
   "{device}: imported {count} play-history entry.": "{device}: imported {count} play-history entry.",
   "{device}: imported {count} play-history entries.": "{device}: imported {count} play-history entries.",
+  "{device}: History ‘{history}’ was left on the USB because the selected USB database has invalid play positions.": "{device}：選択された USB データベースに無効な再生位置があるため、履歴「{history}」は USB デバイスに残しました。",
   "{device}: no new play-history entries.": "{device}: no new play-history entries.",
   "{device}: imported {count} track rating.": "{device}: imported {count} track rating.",
   "{device}: imported {count} track ratings.": "{device}: imported {count} track ratings.",

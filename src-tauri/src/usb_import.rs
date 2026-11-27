@@ -137,6 +137,8 @@ pub struct ImportReport {
     /// Tracks whose available import data already matches the library.
     unchanged: usize,
     warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    ambiguous_history_order: Vec<String>,
     #[serde(skip)] changed: Vec<String>,
 }
 
@@ -479,14 +481,23 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
         drop(marker);
     }
     if history {
-        let snapshot = rbl_export::snapshot::Snapshot::read(root)
+        let histories = rbl_export::snapshot::Snapshot::read_history_import(root)
             .map_err(|e| err(format!("Could not read play history: {e}")))?;
         // Resolve one session at a time; only an eligible nonempty session
         // opens a writer. Each import still owns its existing transaction.
-        let mut sessions = snapshot.history.iter().filter(|h| !h.folder).filter_map(|session| {
-            let matched: Vec<String> = session.tracks.iter().filter_map(|id| tracks.get(id).map(|t| t.0.clone())).collect();
-            if matched.len() != session.tracks.len() {
-                report.skipped += session.tracks.len() - matched.len();
+        let mut sessions = histories.into_iter().filter_map(|entry| {
+            let session = entry.history;
+            let source = &entry.source;
+            // Name and track order can group an alias for display. They do
+            // not prove its positions belong to the selected source session.
+            if !source.has_ordered_ordinals() {
+                report.skipped += source.plays.len();
+                report.ambiguous_history_order.push(session.name);
+                return None;
+            }
+            let matched: Vec<String> = source.plays.iter().filter_map(|play| tracks.get(&play.content_id).map(|t| t.0.clone())).collect();
+            if matched.len() != source.plays.len() {
+                report.skipped += source.plays.len() - matched.len();
                 report.warnings.push(format!("History '{}' contains tracks that could not be matched to this library; it was left on the USB.", session.name));
                 return None;
             }
@@ -497,8 +508,8 @@ fn import_with_stage_budget(state: &AppState, editor: &crate::grid::GridEditor, 
             let imported = state.write(|w| {
                 let mut imported = 0;
                 for (session, matched) in std::iter::once(first).chain(sessions) {
-                    // A session keeps one identity as more tracks are appended.
-                    // Preserve volume-derived identity and per-session prefix checks.
+                    // Keep existing import UUIDs readable. Raw on-media IDs
+                    // and positions alone cannot identify previously counted plays.
                     let key = format!("{}:{}:{}", rbl_devices::volume_id(root), session.id, session.name);
                     let hash = rbl_export::manifest::hash(key.as_bytes());
                     let uuid = format!("00000000-0000-4000-8000-{:012x}", hash & 0xffff_ffff_ffff);
@@ -1480,6 +1491,61 @@ mod tests {
         assert_eq!(report.warnings, vec!["History 'Mixed' contains tracks that could not be matched to this library; it was left on the USB.".to_owned()]);
         assert_eq!(imported_history_rows(&state, "%"), []);
         assert_eq!(std::fs::read(one).unwrap(), before);
+    }
+
+    #[test]
+    fn history_import_skips_ambiguous_play_positions_but_accepts_gaps_and_repeats() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, usb) = history_import_fixture(dir.path());
+        let one = write_history_sessions(&state, &usb, &[
+            (1, "Repeated position", &[1, 1]),
+            (2, "Missing position", &[1]),
+            (3, "Valid gap", &[1, 2, 1]),
+        ]);
+        let db = rbl_onelibrary::playlists::open_read_write(&one).unwrap();
+        db.execute_batch("UPDATE history_content SET sequenceNo=1 WHERE history_id=1;
+            UPDATE history_content SET sequenceNo=NULL WHERE history_id=2;
+            UPDATE history_content SET sequenceNo=sequenceNo*2 WHERE history_id=3;").unwrap();
+        drop(db);
+        let mut legacy = rbl_pdb::build::FileBuilder::new(4096);
+        legacy.add_table(11, &[rbl_pdb::rows::simple_named_row(40, "Repeated position")]);
+        let rows = [1_u32, 2].map(|position| {
+            [1_u32, 40, position].into_iter().flat_map(u32::to_le_bytes).collect()
+        });
+        legacy.add_table(12, &rows);
+        let pdb = one.with_file_name("export.pdb");
+        let legacy_bytes = legacy.finish();
+        std::fs::write(&pdb, &legacy_bytes).unwrap();
+        let before = std::fs::read(&one).unwrap();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let play_counts = || state.read_db(|db| {
+            let mut rows = db.connection().prepare("SELECT DJPlayCount FROM djmdContent ORDER BY ID")?;
+            let counts = rows.query_map([], |row| row.get::<_, Option<i64>>(0))?.collect::<Result<Vec<_>, _>>()?;
+            Ok(counts)
+        }).unwrap();
+        let initial_counts = play_counts();
+
+        let inputs = rbl_export::snapshot::Snapshot::read_history_import(&usb).unwrap();
+        let mirrored = &inputs[0];
+        assert_eq!(mirrored.history.name, "Repeated position");
+        assert!(!mirrored.source.has_ordered_ordinals());
+        assert_eq!(mirrored.aliases.len(), 1);
+        assert_eq!(mirrored.aliases[0].session_id, 40);
+        assert!(mirrored.aliases[0].has_ordered_ordinals());
+        let report = import(&state, &editor, &usb, false, true, false, false).unwrap();
+        assert_eq!((report.histories, report.skipped), (3, 3));
+        assert_eq!(report.ambiguous_history_order, ["Repeated position", "Missing position"]);
+        assert_eq!(imported_history_rows(&state, "Repeated position"), []);
+        assert_eq!(imported_history_rows(&state, "Missing position"), []);
+        let rows = imported_history_rows(&state, "Valid gap");
+        assert_eq!(rows.iter().map(|r| (r.1.clone(), r.2)).collect::<Vec<_>>(),
+            [(rbl_db::fixture::track_id(0), 1), (rbl_db::fixture::track_id(1), 2), (rbl_db::fixture::track_id(0), 3)]);
+        let repeat = import(&state, &editor, &usb, false, true, false, false).unwrap();
+        assert_eq!((repeat.histories, repeat.skipped), (0, 3));
+        assert_eq!(imported_history_rows(&state, "Valid gap"), rows);
+        assert_eq!(play_counts(), initial_counts);
+        assert_eq!(std::fs::read(one).unwrap(), before);
+        assert_eq!(std::fs::read(pdb).unwrap(), legacy_bytes);
     }
 
     #[test]
