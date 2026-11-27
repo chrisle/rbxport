@@ -6,7 +6,7 @@
  * files; desktop dev and release/installer workflows invoke it.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -43,10 +43,23 @@ update("Cargo.toml", text => {
   if (!pattern.test(text)) throw new Error("Missing workspace package version");
   return text.replace(pattern, `$1"${version}"`);
 });
-// Registry/git packages have a source field. Only workspace packages inherit
-// our version; leave third-party packages (including other 0.x versions) alone.
+// A path dependency has no source field either. Read the workspace members'
+// package names so vendored crates keep their upstream version.
+const crateDirectories = readdirSync(new URL("../crates/", import.meta.url), { withFileTypes: true })
+  .filter(entry => entry.isDirectory())
+  .map(entry => `crates/${entry.name}`);
+const workspacePackages = new Set();
+for (const directory of ["src-tauri", ...crateDirectories]) {
+  const manifest = readFileSync(new URL(`../${directory}/Cargo.toml`, import.meta.url), "utf8");
+  const packageSection = manifest.split(/^\[/m).find(section => section.startsWith("package]"));
+  const name = packageSection?.match(/^name\s*=\s*"([^"]+)"/m)?.[1];
+  if (name && /^version\.workspace\s*=\s*true\s*$/m.test(packageSection)) {
+    workspacePackages.add(name);
+  }
+}
 update("Cargo.lock", text => text.split(/(?=^\[\[package\]\])/m).map(block => {
-  if (!block.startsWith("[[package]]") || /^source\s*=/m.test(block)) return block;
+  const name = block.match(/^name = "([^"]+)"/m)?.[1];
+  if (!workspacePackages.has(name) || /^source\s*=/m.test(block)) return block;
   return block.replace(/^version = "[^"]+"/m, `version = "${version}"`);
 }).join(""));
 for (const [path, text] of updates) writeFileSync(path, text);
