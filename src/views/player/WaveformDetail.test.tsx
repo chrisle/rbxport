@@ -211,6 +211,73 @@ describe("PCM read-ahead", () => {
     expect(reads).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    { miss: "empty", timing: "after the miss" },
+    { miss: "error", timing: "after the miss" },
+    { miss: "empty", timing: "while the read is pending" },
+    { miss: "error", timing: "while the read is pending" },
+  ])("retries a stationary PCM viewport after an $miss result when analysis completes $timing", async ({ miss, timing }) => {
+    const first = deferred<Uint8Array>();
+    const recovered = new Uint8Array(8).fill(5);
+    const reads = vi.fn()
+      .mockImplementationOnce(async () => {
+        const bytes = await first.promise;
+        if (miss === "error") throw new Error("PCM unavailable");
+        return bytes;
+      })
+      .mockResolvedValueOnce(recovered);
+    let changed = (_id: string) => {};
+    __setBackend({
+      trackPcmWaveform: reads,
+      onAnalysisChanged: (listener: (id: string) => void) => {
+        changed = listener;
+        return () => {};
+      },
+      onAnalysisProgress: () => () => {},
+    } as unknown as Backend);
+
+    render({ fromMs: 0, toMs: 6000, drawFromMs: 2000, drawToMs: 4000 });
+    await settle();
+    const completeAnalysis = () => act(() => changed("wheel-race-track"));
+    if (timing === "while the read is pending") completeAnalysis();
+    expect(reads).toHaveBeenCalledTimes(1);
+    first.resolve(new Uint8Array());
+    await settle();
+    if (timing === "after the miss") {
+      expect(reads).toHaveBeenCalledTimes(1);
+      completeAnalysis();
+      await settle();
+    }
+
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(reads).toHaveBeenLastCalledWith("wheel-race-track", 0, 6000, 7500);
+    expect(drawn.pcm.mock.lastCall?.[1]).toBe(recovered);
+  });
+
+  it("keeps a usable PCM buffer when its replacement returns empty", async () => {
+    const first = new Uint8Array(8).fill(5);
+    render({ fromMs: 0, toMs: 6000, drawFromMs: 2000, drawToMs: 4000 });
+    await settle();
+    pcm.resolve(first);
+    await settle();
+
+    pcm = deferred<Uint8Array>();
+    drawn.pcm.mockClear();
+    render({ fromMs: 1500, toMs: 7500, drawFromMs: 3500, drawToMs: 5500 });
+    await settle();
+    expect(fetchPcm).toHaveBeenCalledTimes(2);
+    pcm.resolve(new Uint8Array());
+    await settle();
+
+    expect(fetchPcm).toHaveBeenCalledTimes(2);
+    expect(drawn.pcm).toHaveBeenCalledTimes(1);
+    expect(drawn.pcm.mock.lastCall?.[1]).toBe(first);
+    render({ fromMs: 0, toMs: 6000, drawFromMs: 2000, drawToMs: 4000 });
+    await settle();
+    expect(fetchPcm).toHaveBeenCalledTimes(2);
+    expect(drawn.pcm.mock.lastCall?.[1]).toBe(first);
+  });
+
   it("uses the new PCM request after reloading the same track", async () => {
     const old = deferred<Uint8Array>();
     const latest = deferred<Uint8Array>();

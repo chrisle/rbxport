@@ -83,6 +83,7 @@ export const WaveformDetail = memo(function WaveformDetail({
   const ref = useRef<HTMLCanvasElement>(null);
   const [data, setData] = useState<LoadedTag | null>(null);
   const [pcmData, setPcmData] = useState<PcmBuffer | null>(null);
+  const [pcmRetry, setPcmRetry] = useState(0);
   const pendingPcm = useRef<Omit<PcmBuffer, "bytes"> | null>(null);
   const pcmMode = requestedPcmWindow !== undefined;
   // Bumped when the track is re-analysed, so the bytes are fetched again.
@@ -158,17 +159,20 @@ export const WaveformDetail = memo(function WaveformDetail({
       && pending.toMs >= Math.min(pcmWindow.toMs, pcmWindow.drawToMs)) return;
     const request = { trackId, loadIntent, fromMs: pcmWindow.fromMs, toMs: pcmWindow.toMs };
     pendingPcm.current = request;
-    void getBackend().then(backend => backend.trackPcmWaveform(trackId, request.fromMs, request.toMs, 7_500))
-      .then(bytes => {
-        if (pendingPcm.current !== request) return;
-        pendingPcm.current = null;
+    const finish = (bytes?: Uint8Array) => {
+      if (pendingPcm.current !== request) return;
+      pendingPcm.current = null;
+      if (bytes?.length) {
         setPcmData({ ...request, bytes });
-      }).catch(() => {
-        // Retain the last good buffer on a failed read. The next window
-        // update can retry; stale seeks/track responses cannot replace it.
-        if (pendingPcm.current === request) pendingPcm.current = null;
-      });
-  }, [trackId, loadIntent, pcmWindow, pcmData]);
+      } else if ((committed.current?.revision ?? revision) > revision) {
+        // A revision while this read was pending did not start a new read.
+        // Retry that revision on a miss, retaining the last good buffer.
+        setPcmRetry(retry => retry + 1);
+      }
+    };
+    void getBackend().then(backend => backend.trackPcmWaveform(trackId, request.fromMs, request.toMs, 7_500))
+      .then(finish, () => finish());
+  }, [trackId, loadIntent, pcmWindow, pcmData, revision, pcmRetry]);
 
   useEffect(() => {
     let live = true;
