@@ -271,15 +271,18 @@ pub fn write_range_wav(source: &Path, from_secs: f64, to_secs: f64, out: &Path) 
     if to_secs <= from_secs || from_secs < 0.0 || !to_secs.is_finite() {
         return Err(AudioError::Unsupported("the range is empty".into()));
     }
-    let file = std::fs::File::open(source)?;
-    let stream = MediaSourceStream::new(Box::new(file), symphonia::core::io::MediaSourceStreamOptions::default());
+    // The same view of the file as [`MonoStream`] and export: an AIFF's
+    // sound chunk ends where its samples do rather than eight bytes into the
+    // chunk after them, and an AIFF-C alias for PCM decodes. See [`aifc`].
+    let (media, aifc) = aifc::open(source)?;
+    let stream = MediaSourceStream::new(media, symphonia::core::io::MediaSourceStreamOptions::default());
     let mut hint = Hint::new();
     if let Some(ext) = source.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
     }
     let probed = symphonia::default::get_probe()
         .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
-        .map_err(|e| AudioError::Unsupported(e.to_string()))?;
+        .map_err(|e| AudioError::Unsupported(aifc.describe(e)))?;
     let mut format = probed.format;
     let track = format
         .tracks()

@@ -685,6 +685,77 @@ mod tests {
         assert!(played.iter().any(|s| *s != 0.0));
     }
 
+    /// A stereo 16-bit AIFF of `frames` frames, the left channel a ramp and
+    /// the right its inverse, with a chunk of metadata after the sound.
+    fn aiff_then_metadata(path: &Path, frames: u32) {
+        let mut comm = Vec::new();
+        comm.extend_from_slice(&2_u16.to_be_bytes());
+        comm.extend_from_slice(&frames.to_be_bytes());
+        comm.extend_from_slice(&16_u16.to_be_bytes());
+        comm.extend_from_slice(&[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]);
+        let mut sound = vec![0_u8; 8];
+        for i in 0..frames {
+            let value = i16::try_from(i * 10).unwrap();
+            sound.extend_from_slice(&value.to_be_bytes());
+            sound.extend_from_slice(&(-value).to_be_bytes());
+        }
+        let mut body = b"AIFF".to_vec();
+        for (tag, data) in [(b"COMM", comm.as_slice()), (b"SSND", sound.as_slice()), (b"ID3 ", &[0x7F_u8; 8][..])] {
+            body.extend_from_slice(tag);
+            body.extend_from_slice(&u32::try_from(data.len()).unwrap().to_be_bytes());
+            body.extend_from_slice(data);
+        }
+        let mut file = b"FORM".to_vec();
+        file.extend_from_slice(&u32::try_from(body.len()).unwrap().to_be_bytes());
+        file.extend_from_slice(&body);
+        std::fs::write(path, file).unwrap();
+    }
+
+    #[test]
+    fn an_aiff_ends_with_its_samples_not_with_the_chunk_after_them() {
+        // symphonia 0.5.5 counts the sound chunk's eight-byte prefix as
+        // samples: this file was two frames longer than it is, and the last
+        // two were the header of the chunk after the sound.
+        for frames in [3_u32, 2_205] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("metadata-after.aif");
+            aiff_then_metadata(&path, frames);
+            let mut streamer = Streamer::open(&path, 44_100).unwrap();
+            assert_eq!(streamer.total_frames(), u64::from(frames));
+            let played = drain(&mut streamer);
+            assert_eq!(played.len(), frames as usize * 2, "{frames} frames");
+            for (i, frame) in played.chunks_exact(2).enumerate() {
+                let value = (i * 10) as f32 / 32_768.0;
+                assert!((frame[0] - value).abs() < 1e-6 && (frame[1] + value).abs() < 1e-6, "frame {i} of {frames}");
+            }
+            assert_eq!(streamer.position(), u64::from(frames));
+        }
+    }
+
+    #[test]
+    fn a_seek_in_an_aiff_knows_where_its_samples_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("metadata-after.aif");
+        let frames = 2_205_u64;
+        aiff_then_metadata(&path, u32::try_from(frames).unwrap());
+        let mut streamer = Streamer::open(&path, 44_100).unwrap();
+        // The last frame is the last one handed out.
+        assert_eq!(streamer.seek(frames - 1).unwrap(), frames - 1);
+        let mut out = vec![0.0_f32; 64];
+        assert_eq!(streamer.fill(&mut out).unwrap(), 1);
+        let last = ((frames - 1) * 10) as f32 / 32_768.0;
+        assert!((out[0] - last).abs() < 1e-6 && (out[1] + last).abs() < 1e-6, "{} {}", out[0], out[1]);
+        assert_eq!(streamer.fill(&mut out).unwrap(), 0);
+        assert!(streamer.finished());
+        // The end itself can be sought, and holds nothing. One frame past it
+        // is past the end, not into the chunk after the samples: the two
+        // frames the uncorrected length declared would have let it through.
+        assert_eq!(streamer.seek(frames).unwrap(), frames);
+        assert_eq!(streamer.fill(&mut out).unwrap(), 0);
+        let error = streamer.seek(frames + 1).unwrap_err().to_string();
+        assert!(error.contains("out-of-range"), "{error}");
+    }
+
     #[test]
     fn a_file_at_the_device_rate_comes_back_frame_for_frame() {
         let dir = tempfile::tempdir().unwrap();
