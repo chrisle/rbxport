@@ -48,10 +48,11 @@ fn main() {
             "bpm": row.get::<_, Option<i64>>(4)?, "analysis": row.get::<_, Option<String>>(5)?,
         }))).expect("read tracks").collect::<Result<_, _>>().expect("decode tracks");
         let mut query = db.connection().prepare(
-            "SELECT ID, Name FROM djmdPlaylist WHERE rb_local_deleted = 0 ORDER BY ID"
+            "SELECT ID, Name, ParentID FROM djmdPlaylist WHERE rb_local_deleted = 0 ORDER BY ID"
         ).expect("playlist query");
         let playlists: Vec<serde_json::Value> = query.query_map([], |row| Ok(serde_json::json!({
             "id": row.get::<_, String>(0)?, "name": row.get::<_, String>(1)?,
+            "parent": row.get::<_, Option<String>>(2)?,
         }))).expect("read playlists").collect::<Result<_, _>>().expect("decode playlists");
         let mut query = db.connection().prepare(
             "SELECT PlaylistID, ContentID FROM djmdSongPlaylist WHERE rb_local_deleted = 0 ORDER BY PlaylistID, TrackNo, ID"

@@ -81,11 +81,11 @@ if args.count == 2, args[0] == "--layout", let pid = Int32(args[1]), let window 
     Thread.sleep(forTimeInterval:0.4)
     print("{\"layout\":true}"); exit(0)
 }
-// Drags a track row out of the library, to a point inside the same window, or
-// cancels it with Escape. Both leave the filesystem untouched: the drop never
-// lands on Finder or the desktop.
-if args.count >= 7, args[0] == "--drag-out", let pid = Int32(args[1]), let x = Double(args[2]), let y = Double(args[3]),
-   let viewport = Double(args[4]), let toX = Double(args[5]), let toY = Double(args[6]) {
+// Drags a track row to a point inside the same test window, or cancels with
+// Escape. The focus click stays on a separate, neutral toolbar point.
+if args.count >= 9, args[0] == "--drag-out", let pid = Int32(args[1]), let x = Double(args[2]), let y = Double(args[3]),
+   let viewport = Double(args[4]), let toX = Double(args[5]), let toY = Double(args[6]),
+   let focusX = Double(args[7]), let focusY = Double(args[8]) {
     guard let appWindow = windows(pid).first, let appOrigin = point(appWindow,kAXPositionAttribute), let appSize = size(appWindow) else { fail("No test app window") }
     let appAX = AXUIElementCreateApplication(pid)
     AXUIElementSetAttributeValue(appAX,kAXFrontmostAttribute as CFString,kCFBooleanTrue)
@@ -94,15 +94,16 @@ if args.count >= 7, args[0] == "--drag-out", let pid = Int32(args[1]), let x = D
     let top = appOrigin.y + appSize.height - viewport
     let from = CGPoint(x:appOrigin.x+x,y:top+y)
     let to = CGPoint(x:appOrigin.x+toX,y:top+toY)
+    let focus = CGPoint(x:appOrigin.x+focusX,y:top+focusY)
     let visible = normalVisibleWindows()
-    guard windowOwner(at: from, in: visible) == pid, windowOwner(at: to, in: visible) == pid else {
+    guard [from, to, focus].allSatisfy({ windowOwner(at: $0, in: visible) == pid }) else {
         fail("Outgoing drag points must fall on the test window")
     }
     // Finder was active during the preceding drop. A click on the fixture's
     // neutral toolbar gives its webview focus before the actual track press.
-    mouse(.mouseMoved,to); Thread.sleep(forTimeInterval:0.1)
-    mouse(.leftMouseDown,to); Thread.sleep(forTimeInterval:0.1)
-    mouse(.leftMouseUp,to); Thread.sleep(forTimeInterval:0.6)
+    mouse(.mouseMoved,focus); Thread.sleep(forTimeInterval:0.1)
+    mouse(.leftMouseDown,focus); Thread.sleep(forTimeInterval:0.1)
+    mouse(.leftMouseUp,focus); Thread.sleep(forTimeInterval:0.6)
     mouse(.mouseMoved,from); Thread.sleep(forTimeInterval:0.15)
     mouse(.leftMouseDown,from); Thread.sleep(forTimeInterval:0.2)
     for step in 1...45 {

@@ -204,7 +204,16 @@ async function scenario(name, body) {
 }
 try {
   console.log(`Evidence: ${out}\nTemporary library: ${library}`);
-  const signature = () => createHash('sha256').update(readFileSync(path.join(repo, 'target/debug/rbxport'))).update(readFileSync(path.join(repo, 'scripts/desktop/tauri.conf.json'))).digest('hex');
+  const signature = () => {
+    const hash = createHash('sha256');
+    for (const file of [
+      'target/debug/rbxport', 'scripts/desktop/tauri.conf.json',
+      'target/debug/desktop-native-input', 'scripts/desktop/native-input.swift',
+      'target/debug/examples/e2e_fixture', 'crates/rbl-db/examples/e2e_fixture.rs',
+      'target/debug/examples/desktop_verify',
+    ]) hash.update(readFileSync(path.join(repo, file)));
+    return hash.digest('hex');
+  };
   const stamp = path.join(repo, 'target/debug/desktop-test-build.sha256');
   if (!reuse) {
     command('pnpm', ['tauri', 'build', '--debug', '--no-bundle', '--config', 'scripts/desktop/tauri.conf.json'], { stdio: 'inherit' });
@@ -212,7 +221,7 @@ try {
     command('cargo',['build','-q','-p','rbl-export','--example','desktop_verify']);
     command('/usr/bin/swiftc',['scripts/desktop/native-input.swift','-o',native]);
     writeFileSync(stamp, signature());
-  } else assert.equal(readFileSync(stamp, 'utf8'), signature(), 'Rebuild with pnpm desktop:test; this binary was not built by the isolated desktop harness');
+  } else assert.equal(readFileSync(stamp, 'utf8'), signature(), 'Rebuild with pnpm desktop:test; the app or helper binaries no longer match the isolated harness stamp');
   binarySha = createHash('sha256').update(readFileSync(path.join(repo, 'target/debug/rbxport'))).digest('hex');
   command(path.join(repo, 'target/debug/examples/e2e_fixture'), [library, library]);
   assert.ok(Array.isArray(database().playlistEntries),

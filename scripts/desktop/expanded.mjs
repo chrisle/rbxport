@@ -103,9 +103,9 @@ export async function expanded(c) {
       }
     }
   }
-  // A real outgoing drag of a playable fixture track, released on the
-  // toolbar (a completed drag that lands nowhere) or cancelled with Escape.
-  async function trackDragOut({cancel=false}={}) {
+  // A real outgoing drag of a playable fixture track, released on a
+  // playlist row or the neutral toolbar, or cancelled with Escape.
+  async function trackDragOut({cancel=false, targetSelector=null}={}) {
     command(native,['--layout',String(c.pid())],{timeout:30000});
     await until(()=>state('innerWidth===1200 && innerHeight===800'),'fixed 1200 × 800 viewport');
     const at = await state(`(() => {
@@ -128,6 +128,15 @@ export async function expanded(c) {
         return bar.contains(target) && !target.closest('a, button, input, select, [role="button"], [contenteditable=true]');
       });
       if (toolbarX === undefined) throw Error('No neutral toolbar point for the outgoing drag');
+      const selector = ${JSON.stringify(targetSelector)};
+      const target = selector && document.querySelector(selector);
+      if (selector && !target) throw Error('Missing native track drop target');
+      const bounds = target?.getBoundingClientRect();
+      const toX = bounds ? bounds.x + bounds.width * .65 : toolbarX;
+      const toY = bounds ? bounds.y + bounds.height / 2 : toolbarY;
+      if (target && !target.contains(document.elementFromPoint(toX, toY))) {
+        throw Error('Native track drop target must be visible and hit-testable');
+      }
       window.__desktopOutgoingEvents = [];
       window.__desktopOutgoingListener ??= e => {
         if (!e.isTrusted || (e.type === 'pointermove' && !e.buttons)) return;
@@ -137,7 +146,7 @@ export async function expanded(c) {
       for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
         window.addEventListener(type, window.__desktopOutgoingListener, true);
       }
-      return {x, y, toX: toolbarX, toY: toolbarY, height: innerHeight};
+      return {x, y, toX, toY, focusX: toolbarX, focusY: toolbarY, height: innerHeight};
     })()`);
     const logDir = path.join(out, 'logs');
     const dragLog = () => readdirSync(logDir).sort().flatMap(file =>
@@ -159,7 +168,7 @@ export async function expanded(c) {
         await state('window.__desktopOutgoingEvents = []');
         const evidence = JSON.parse(command(native, [
           '--drag-out', String(c.pid()), String(at.x), String(at.y), String(at.height),
-          String(at.toX), String(at.toY), ...(cancel ? ['--cancel'] : []),
+          String(at.toX), String(at.toY), String(at.focusX), String(at.focusY), ...(cancel ? ['--cancel'] : []),
         ], {timeout: 30000}));
         const observation = {evidence};
         attempts.push(observation);
@@ -239,6 +248,72 @@ export async function expanded(c) {
     await verifyFinderImport(file, allTracksTree);
   });
 
+  const dropInsidePlaylistFolder = () => scenario('Finder drops an audio folder inside an existing playlist folder', async () => {
+    const sourceFolder = path.join(sources, 'Nested Finder Set');
+    const file = path.join(sourceFolder, 'Audio', 'Nested Finder tone.wav');
+    mkdirSync(path.dirname(file), {recursive: true});
+    copyFileSync(single, file);
+
+    await collection();
+    const initial = database();
+    await context(`${tree}[data-kind="collection"]`, undefined, 'Create New Folder');
+    await until(() => database().playlists.length === initial.playlists.length + 1,
+      'new playlist folder reaches SQLCipher');
+    const before = database();
+    const parent = before.playlists.find(entry => !initial.playlists.some(old => old.id === entry.id));
+    assert.ok(parent, 'The destination folder must exist in SQLCipher');
+    const target = `${tree}[data-kind="folder"][data-file-drop-playlist=${JSON.stringify(parent.id)}]`;
+    await until(() => app().count(target), 'writable playlist folder drop target');
+
+    await nativeDrop([sourceFolder], target);
+    const playlistName = path.basename(sourceFolder);
+    await waitText('footer', `Made playlists: ${playlistName}.`);
+    const after = database();
+    const playlist = after.playlists.find(entry => entry.name === playlistName);
+    assert.equal(playlist?.parent, parent.id, 'The new playlist must be nested in the destination folder');
+    assert.deepEqual(after.playlists.filter(entry => entry.id !== playlist.id), before.playlists,
+      'Only the intended playlist may be created');
+    const imported = after.tracks.filter(track => track.path && existsSync(track.path) && canonical(track.path) === canonical(file));
+    assert.equal(imported.length, 1, 'The nested Finder file must enter the collection once');
+    const track = imported[0].id;
+    assert.deepEqual(after.tracks.filter(entry => entry.id !== track), before.tracks,
+      'Existing collection tracks must be unchanged');
+    assert.deepEqual(after.playlistEntries.filter(entry => entry.track === track), [{playlist: playlist.id, track}],
+      'The imported track must be assigned to the nested playlist once');
+    assert.deepEqual(after.playlistEntries.filter(entry => entry.track !== track), before.playlistEntries,
+      'Existing playlist memberships must be unchanged');
+  });
+
+  const addExistingTrackByDrag = () => scenario('a native collection track drag adds its existing ID to a playlist', async () => {
+    const initial = database();
+    await context(`${tree}[data-kind="collection"]`, undefined, 'Create New Playlist');
+    await until(() => database().playlists.length === initial.playlists.length + 1,
+      'track drag destination reaches SQLCipher');
+    await collection();
+    const before = database();
+    const playlist = before.playlists.find(entry => !initial.playlists.some(old => old.id === entry.id));
+    assert.ok(playlist, 'The destination playlist must exist in SQLCipher');
+    const target = `${tree}[data-kind="playlist"][data-file-drop-playlist=${JSON.stringify(playlist.id)}]`;
+    await until(() => app().count(target), 'writable track drag destination');
+    const track = before.tracks.find(entry => entry.title === 'Fixture Track 0')?.id;
+    assert.ok(track, 'The drag must start with a known collection track');
+    const destination = {playlist: playlist.id, track};
+    const matches = entry => entry.playlist === destination.playlist && entry.track === track;
+    assert.ok(!before.playlistEntries.some(matches), 'The destination must not already contain the track');
+
+    await trackDragOut({targetSelector: target});
+    // The existing-file import fallback reports "already in the library".
+    await waitText('footer', `Added 1 track to ${playlist.name}.`);
+    await until(() => database().playlistEntries.filter(matches).length === 1,
+      'the original track ID is assigned to the destination playlist');
+    const after = database();
+    assert.deepEqual(after.tracks, before.tracks, 'Dragging a collection track must not import another track');
+    assert.deepEqual(after.playlists, before.playlists, 'Dragging a collection track must not change playlist rows');
+    assert.deepEqual(after.playlistEntries.filter(matches), [destination], 'Exactly one destination membership is stored');
+    assert.deepEqual(after.playlistEntries.filter(entry => !matches(entry)), before.playlistEntries,
+      'Existing playlist memberships must be unchanged');
+  });
+
   const dropAfterTrackDrag = (cancel = false) => scenario(`a Finder drop still lands after a ${cancel ? 'cancelled' : 'completed'} outgoing track drag`, async () => {
     await collection();
     await trackDragOut({cancel});
@@ -281,6 +356,8 @@ export async function expanded(c) {
     await clickText(tree, newPlaylist);
     await waitText(title, `${newPlaylist} (2 Tracks)`);
     await dropOnAllTracksTree();
+    await dropInsidePlaylistFolder();
+    await addExistingTrackByDrag();
     await dropAfterTrackDrag();
     await dropAfterTrackDrag(true);
     return;
@@ -371,6 +448,8 @@ export async function expanded(c) {
     await waitText(tree,path.basename(folder));await clickText(tree,path.basename(folder));await waitText(title,'(1 Tracks)');
     assert.ok(held(file));
   });
+  await dropInsidePlaylistFolder();
+  await addExistingTrackByDrag();
   await clickText(tree, name);
   await waitText(title, name);
   await dropOnAllTracksTree();
