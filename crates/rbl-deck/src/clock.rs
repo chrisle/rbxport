@@ -18,6 +18,13 @@ impl SeekRequest {
     pub(crate) fn load(self) -> u64 { self.load }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PlaybackStart {
+    Unloaded,
+    Resume,
+    Restart(SeekRequest),
+}
+
 /// One deck's shared state.
 #[derive(Debug, Default)]
 pub struct DeckClock {
@@ -230,7 +237,8 @@ impl DeckClock {
         let waiting = self.start_in.load(Ordering::Relaxed);
         let passed = waiting.min(frames);
         if passed > 0 {
-            self.start_in.store(waiting - passed, Ordering::Relaxed);
+            // A control request may have cleared or replaced this wait.
+            let _ = self.start_in.compare_exchange(waiting, waiting - passed, Ordering::Relaxed, Ordering::Relaxed);
         }
         passed
     }
@@ -406,17 +414,45 @@ impl DeckClock {
     /// This gate is never taken by the realtime callback or held over I/O.
     pub(crate) fn request_seek(&self, frame: u64, pre_roll: u64) -> Option<SeekRequest> {
         let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let load = self.current_load()?;
+        self.set_start_in(0);
+        Some(self.publish_seek(load, frame, pre_roll))
+    }
+
+    /// Starts the current load, rewinding a finished track only while its
+    /// EOF state still belongs to the current target. An explicit seek in
+    /// progress keeps its target, and a later seek can clear this start wait.
+    pub(crate) fn start_playback(&self, wait: u64) -> PlaybackStart {
+        let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(load) = self.current_load() else { return PlaybackStart::Unloaded };
+        let start = if !self.seek_pending.load(Ordering::Acquire)
+            && self.end_of_stream()
+            && self.position() >= self.total()
+        {
+            PlaybackStart::Restart(self.publish_seek(load, 0, 0))
+        } else {
+            PlaybackStart::Resume
+        };
+        self.set_start_in(wait);
+        self.set_playing(true);
+        start
+    }
+
+    fn current_load(&self) -> Option<u64> {
         let load = self.load_id();
-        if !self.loaded() || load == 0 || self.requested_load() != load { return None; }
+        (self.loaded() && load != 0 && self.requested_load() == load).then_some(load)
+    }
+
+    /// Caller holds `load_gate` and has verified the loaded identity.
+    fn publish_seek(&self, load: u64, frame: u64, pre_roll: u64) -> SeekRequest {
         let serial = self.seek_serial.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
         self.seek_pending.store(true, Ordering::Release);
         self.set_pre_roll(pre_roll);
         self.rearm_active_before(frame);
         self.set_position(frame);
-        self.set_start_in(0);
         self.set_end_of_stream(false);
         self.bump_generation();
-        Some(SeekRequest { serial, load })
+        SeekRequest { serial, load }
     }
 
     fn seek_matches(&self, request: SeekRequest) -> bool {
@@ -479,6 +515,7 @@ impl DeckClock {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic, reason = "a missing test request is a fixture failure")]
 mod tests {
     use super::*;
 
@@ -497,5 +534,59 @@ mod tests {
         assert_eq!(clock.bump_generation(), 1);
         assert_eq!(clock.bump_generation(), 2);
         assert_eq!(clock.generation(), 2);
+    }
+
+    fn finished_deck() -> DeckClock {
+        let clock = DeckClock::default();
+        clock.request_load(1);
+        clock.set_total(4_096);
+        clock.set_position(4_096);
+        assert!(clock.install_load(1));
+        clock.set_end_of_stream(true);
+        clock.play_out();
+        clock
+    }
+
+    #[test]
+    fn play_at_the_end_keeps_the_target_of_a_pending_explicit_seek() {
+        let clock = finished_deck();
+        let seek = clock.request_seek(2_048, 0).unwrap();
+        let generation = clock.generation();
+
+        assert_eq!(clock.start_playback(512), PlaybackStart::Resume);
+        assert!(clock.playing());
+        assert_eq!(clock.position(), 2_048);
+        assert_eq!(clock.generation(), generation);
+        assert_eq!(clock.start_in(), 512);
+        assert!(clock.complete_seek(seek, || {}));
+    }
+
+    #[test]
+    fn an_explicit_seek_supersedes_a_delayed_restart_and_clears_its_wait() {
+        let clock = finished_deck();
+        let PlaybackStart::Restart(restart) = clock.start_playback(512) else {
+            panic!("play at EOF did not request a restart");
+        };
+        assert_eq!(clock.position(), 0);
+        assert_eq!(clock.start_in(), 512);
+
+        let seek = clock.request_seek(2_048, 0).unwrap();
+        assert!(!clock.complete_seek(restart, || {}));
+        assert!(clock.complete_seek(seek, || {}));
+        assert_eq!(clock.position(), 2_048);
+        assert_eq!(clock.start_in(), 0);
+        assert!(clock.playing());
+    }
+
+    #[test]
+    fn a_pending_replacement_load_cannot_restart_the_finished_track() {
+        let clock = finished_deck();
+        clock.request_load(2);
+        let generation = clock.generation();
+
+        assert_eq!(clock.start_playback(512), PlaybackStart::Unloaded);
+        assert!(!clock.playing());
+        assert_eq!(clock.start_in(), 0);
+        assert_eq!(clock.generation(), generation);
     }
 }
