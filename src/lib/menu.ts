@@ -17,7 +17,6 @@ export type MenuAction =
   | "export-xml"
   | "missing"
   | "info"
-  | "analyze-track"
   | "locate-loaded"
   // A Track or Playlist menu item that runs a list's or the tree's command
   // (`menuBar.ts`).
@@ -48,10 +47,6 @@ const COMMANDS: Record<string, MenuCommand> = {
   // and they are greyed while the library is read-only.
   missing: { action: "missing", writes: false },
   info: { action: "info", writes: false },
-  // Track › Analyze Track, rekordbox's 4000: the selected tracks go to the
-  // analyser. It writes, but the command refuses a read-only library itself,
-  // in the words its key gets, so the menu does not refuse it first.
-  "analyze-track": { action: "analyze-track", writes: false },
   // Track › Locate track loaded on deck, rekordbox's b139 (command + L).
   "locate-loaded": { action: "locate-loaded", writes: false },
   sub: { action: "sub", writes: false },

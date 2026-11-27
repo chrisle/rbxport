@@ -96,19 +96,19 @@ describe("menuBarEnabled", () => {
     expect(enabled(LIST, { selected: 3, rows: [{ missing: true }] }, "allTracks")).toContain("analyze-track");
   });
 
-  it("greys Analyze Track for the sub-browser, whose selection it does not analyse", () => {
+  it("offers Analyze Track in the focused sub-browser", () => {
     const out = menuBarEnabled({
       focus: { pane: "list", side: "sub" },
       lists: { sub: { source: "collection", selected: 1, rows: [{}], loose: false } },
       trees: {},
       has: () => true,
     });
-    expect(out["analyze-track"]).toBe(false);
+    expect(out["analyze-track"]).toBe(true);
     expect(out["remove-from-collection"]).toBe(true);
   });
 
-  it("finds global Analyze Track and Sort Items commands in the real registry", () => {
-    const releaseAnalyze = registerCommand("analyseSelection", () => true);
+  it("finds scoped Analyze Track and global Sort Items in the real registry", () => {
+    const releaseAnalyze = registerCommand("analyseSelection", () => true, "main");
     const releaseSort = registerCommand("sortItems", () => true);
     const has = (action: Parameters<typeof hasCommand>[0], side?: Parameters<typeof hasCommand>[1]) =>
       side === undefined ? hasCommand(action) : hasCommand(action, side);
@@ -119,8 +119,13 @@ describe("menuBarEnabled", () => {
         trees: { main: { kind: "folder" as const, hasChildren: true } },
         has,
       };
-      expect(hasCommand("analyseSelection", "main")).toBe(false);
+      expect(hasCommand("analyseSelection")).toBe(false);
       expect(menuBarEnabled(input)["analyze-track"]).toBe(true);
+      expect(menuBarEnabled({
+        ...input,
+        focus: { pane: "list", side: "sub" },
+        lists: { ...input.lists, sub: input.lists.main },
+      })["analyze-track"]).toBe(false);
       expect(menuBarEnabled({ ...input, focus: TREE })["sort-items"]).toBe(true);
     } finally {
       releaseSort();

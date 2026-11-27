@@ -66,6 +66,8 @@ export const MENU_BAR_ITEMS: readonly MenuBarItem[] = [
     id: action.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`), action,
     owner: group === "Track" ? "list" : "tree", writes: !action.startsWith("export"),
   })),
+  // Analyze Track reports the same read-only refusal as the context menu.
+  { id: "analyze-track", action: "analyseSelection", owner: "list", writes: false },
   { id: "add-to-playlist", action: "addToPlaylist", owner: "list", writes: true },
   { id: "export-track", action: "exportTrack", owner: "list", writes: false },
   { id: "export-playlist", action: "exportPlaylist", owner: "tree", writes: false },
@@ -150,8 +152,7 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   // the collection. rbxport imports the loose files of the selection.
   live("import-to-collection", list !== undefined && n > 0 && list.loose);
   // Analyze Track, 0x4000: a selected track that is not missing.
-  // `analyseSelection` is the main browser's.
-  out["analyze-track"] = tracks && side === "main" && anyPresent && has("analyseSelection");
+  live("analyze-track", tracks && anyPresent);
   // Analysis Lock Off needs a locked master row. Explorer preserves its
   // independently established folder-browse fallback (stock 0x4013).
   live("analysis-lock-on", tracks && anyPresent);

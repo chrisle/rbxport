@@ -14,8 +14,9 @@ describe("menu", () => {
   });
 
   it("leaves Track › Analyze Track to the command, which refuses a read-only library itself", () => {
-    expect(menuCommand("analyze-track")?.writes).toBe(false);
-    expect(resolveMenu("analyze-track", true)).toEqual({ action: "analyze-track" });
+    expect(resolveMenu("analyze-track", true)).toMatchObject({
+      action: "bar-command", item: { action: "analyseSelection", owner: "list", writes: false },
+    });
   });
 
   it("hands a Track or Playlist menu item to its shared command", () => {

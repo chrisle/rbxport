@@ -47,7 +47,7 @@ import { keyMap } from "@/lib/keyPresets";
 import { detectPlatform, dispatch, isTyping, menuAccelerator, type Action } from "@/lib/shortcuts";
 import { hasCommand, runCommand } from "@/lib/commands";
 import { useMissingFilesManager } from "@/views/library/useMissingFilesManager";
-import { browserFocus, followBrowserFocus, onBrowserFocus } from "@/lib/browserFocus";
+import { browserFocus, followBrowserFocus, onBrowserFocus, setBrowserFocus, type BrowserFocus } from "@/lib/browserFocus";
 import { menuBarEnabled, menuBarAction, menuBarTargets, menuBarSide, menuBarState, onMenuBarState } from "@/lib/menuBar";
 import { hasEditHistory, runEditHistory, setLibraryEditHistory } from "@/lib/editHistory";
 import { transposeKey } from "@/lib/camelot";
@@ -110,7 +110,7 @@ import { useNativeMenu } from "@/store/useNativeMenu";
 
 /** The commands the shell itself registers, and so the keys it runs. */
 const SHELL_COMMANDS: ReadonlySet<Action> = new Set<Action>([
-  "volumeUp", "volumeDown", "mute", "focusSearch", "clearSearch", "analyseSelection", "sortItems",
+  "volumeUp", "volumeDown", "mute", "focusSearch", "clearSearch", "sortItems",
 ]);
 
 /**
@@ -2342,7 +2342,14 @@ function AppBody() {
   // other write is while rekordbox holds the file or the library is protected.
   // The message names the real cause, as every other write refusal does.
   const refuseAnalysis = useEventCallback(() => refuse(refusal(advancedPrefs.protectLibrary)));
-  const [analysisSelection, setAnalysisSelection] = useState<readonly QueueItem[] | null>(null);
+  const [analysisSelection, setAnalysisSelection] = useState<{
+    tracks: readonly QueueItem[];
+    focus: BrowserFocus;
+  } | null>(null);
+  const closeAnalysis = () => {
+    if (browserFocus() === null && analysisSelection !== null) setBrowserFocus(analysisSelection.focus);
+    setAnalysisSelection(null);
+  };
   /** Capture either browser's selection before opening the settings dialog. */
   const analyseTracks = useEventCallback((tracks: readonly { id: string; title: string }[]) => {
     if (tracks.length === 0) return;
@@ -2350,7 +2357,7 @@ function AppBody() {
       refuseAnalysis();
       return;
     }
-    setAnalysisSelection(tracks.map(({ id, title }) => ({ id, title })));
+    setAnalysisSelection({ tracks: tracks.map(({ id, title }) => ({ id, title })), focus: browserFocus() });
   });
   const analyseSelection = useEventCallback(() => analyseTracks(selectedTracks));
   const reportSubSelection = useCallback((tracks: { id: string; title: string }[], source?: ViewSpec["source"]) => {
@@ -2367,7 +2374,7 @@ function AppBody() {
         refuseAnalysis();
         return;
       }
-      setAnalysisSelection([{ id, title }]);
+      setAnalysisSelection({ tracks: [{ id, title }], focus: browserFocus() });
     },
     [readOnly, refuseAnalysis],
   );
@@ -2529,11 +2536,6 @@ function AppBody() {
         ? undefined : { scope: outcome.item.browserSide ?? menuBarSide(browserFocus()), ...(outcome.item.target === undefined ? {} : { target: outcome.item.target }) });
       return;
     }
-    if (outcome.action === "analyze-track") {
-      // Track › Analyze Track: the same command as its key.
-      runCommand("analyseSelection");
-      return;
-    }
     if (outcome.action === "sub") {
       setSubOpen((open) => !open);
       return;
@@ -2579,8 +2581,7 @@ function AppBody() {
       const enabled = menuBarEnabled({
         focus: browserFocus(),
         ...menuBarState(),
-        // Analyze Track is the shell's own command, not a list's.
-        has: (action, side) => side === undefined ? hasCommand(action) : hasCommand(action, side),
+        has: hasCommand,
       });
       const changed: Record<string, boolean> = {};
       for (const [id, on] of Object.entries(enabled)) {
@@ -2656,10 +2657,6 @@ function AppBody() {
     clearSearch: () => {
       if (query === "") searchRef.current?.blur();
       else setQuery("");
-      return true;
-    },
-    analyseSelection: () => {
-      analyseSelection();
       return true;
     },
   });
@@ -3787,16 +3784,16 @@ function AppBody() {
         /></Suspense>
       ) : null}
       {analysisSelection !== null ? (
-        <AnalysisDialog count={analysisSelection.length} initialMode={analysisPrefs.mode}
+        <AnalysisDialog count={analysisSelection.tracks.length} initialMode={analysisPrefs.mode}
           initialBpmRange={analysisPrefs.bpmRange}
           initialFirstBeatCue={analysisPrefs.firstBeatCue}
           stageOrder={analysisPrefs.stageOrder}
           initialKey={analysisPrefs.detectKey}
-          onCancel={() => setAnalysisSelection(null)}
+          onCancel={closeAnalysis}
           onConfirm={settings => {
             if (readOnly) { refuseAnalysis(); return; }
-            analysis.add(analysisSelection, settings);
-            setAnalysisSelection(null);
+            analysis.add(analysisSelection.tracks, settings);
+            closeAnalysis();
           }} />
       ) : null}
       {autoAnalysis !== null ? (

@@ -2042,6 +2042,7 @@ export const TrackTable = memo(function TrackTable({
       return true;
     },
     importToCollection: onSelection(onImportToCollection),
+    analyseSelection: onSelection(onAnalyse),
     analysisLockOn: onSelection(onAnalysisLock && ((ids) => onAnalysisLock(ids, true))),
     analysisLockOff: onSelection(onAnalysisLock && ((ids) => onAnalysisLock(ids, false))),
     reloadTag: onSelection(onReloadTag),
@@ -2688,7 +2689,7 @@ export const TrackTable = memo(function TrackTable({
                 runCommand("reloadTag", { scope: listScope });
                 break;
               case "analyse":
-                onAnalyse?.();
+                runCommand("analyseSelection", { scope: listScope });
                 break;
               case "showInformation":
                 onShowInformation?.(trackMenu.row);
