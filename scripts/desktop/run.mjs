@@ -43,6 +43,9 @@ const lockFile=path.join(tmpdir(),`rbx-desktop-${process.getuid()}.lock`);
 const env = { ...process.env, RB_LITE_TEST: '1', RBXPORT_TEST: '1', RBXPORT_STATE_DIR: path.join(root, 'state'),
   RBXPORT_LOG_DIR: path.join(out, 'logs'), RBXPORT_OPTIONS: path.join(library, 'options.json'),
   MACOSX_DEPLOYMENT_TARGET:'11.0', RBXPORT_TEST_FIXTURE: library, RBXPORT_TEST_DATA_STORE: randomUUID(), RB_LITE_FAKE_VOLUMES: destination };
+// The native drag checks read AppKit's result from the app log.
+const logFilter = env.RUST_LOG || env.LOG_LEVEL;
+if (logFilter) env.RUST_LOG = `${logFilter},rbxport_lib::file_drag=debug`;
 // Never inherit an unsafe-write override or a snapshot request.
 delete env.RBX_DISABLE_READ_ONLY;
 delete env.RBXPORT_DESKTOP_SNAPSHOT;

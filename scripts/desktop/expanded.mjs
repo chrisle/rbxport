@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, writeFileSync, existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { copyFileSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 export async function expanded(c) {
@@ -100,16 +100,61 @@ export async function expanded(c) {
       }
       return {x, y, toX: toolbarX, toY: toolbarY, height: innerHeight};
     })()`);
-    const evidence = JSON.parse(command(native,['--drag-out',String(c.pid()),String(at.x),String(at.y),String(at.height),String(at.toX),String(at.toY),...(cancel?['--cancel']:[])],{timeout:30000}));
-    const pointerEvents = await state(`(() => {
-      for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
-        window.removeEventListener(type, window.__desktopOutgoingListener, true);
+    const logDir = path.join(out, 'logs');
+    const dragLog = () => readdirSync(logDir).sort().flatMap(file =>
+      readFileSync(path.join(logDir, file), 'utf8').split('\n')
+        .filter(line => line.includes('rbxport_lib::file_drag:')),
+    );
+    const logStart = dragLog().length;
+    const expectedResult = cancel ? 'Cancel' : 'Dropped';
+    const attempts = [];
+    const artifact = path.join(out, `track-drag-out-${c.resultCount()}.json`);
+    let nativeEvents = [];
+    const captureEvidence = () => {
+      nativeEvents = dragLog().slice(logStart);
+      writeFileSync(artifact, JSON.stringify({cancel, at, attempts, nativeEvents}, null, 2));
+      return nativeEvents;
+    };
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await state('window.__desktopOutgoingEvents = []');
+        const evidence = JSON.parse(command(native, [
+          '--drag-out', String(c.pid()), String(at.x), String(at.y), String(at.height),
+          String(at.toX), String(at.toY), ...(cancel ? ['--cancel'] : []),
+        ], {timeout: 30000}));
+        const observation = {evidence};
+        attempts.push(observation);
+        captureEvidence();
+        const pointerEvents = await state('window.__desktopOutgoingEvents');
+        observation.pointerEvents = pointerEvents;
+        nativeEvents = dragLog().slice(logStart);
+
+        // A lost native press can leave only the preliminary toolbar click.
+        // Replay only when neither WKWebView nor the app saw the track press.
+        const trackPressed = pointerEvents.some(event =>
+          event.type === 'pointerdown' && event.cell === 'title' && event.buttons === 1,
+        );
+        if (trackPressed || nativeEvents.length > 0) {
+          await until(() => dragLog().slice(logStart).some(line => line.includes('native file drag finished')),
+            'outgoing native file drag to finish', 5000);
+          assert.deepEqual(
+            captureEvidence().flatMap(line => line.match(/native file drag finished result=(\w+)/)?.[1] ?? []),
+            [expectedResult],
+            'AppKit must report the expected result for exactly one outgoing drag',
+          );
+          return;
+        }
       }
-      return window.__desktopOutgoingEvents;
-    })()`);
-    writeFileSync(path.join(out,`track-drag-out-${c.resultCount()}.json`),JSON.stringify({cancel,at,evidence,pointerEvents},null,2));
-    assert.ok(pointerEvents.some(e => e.type === 'pointerdown' && e.cell === 'title' && e.buttons === 1),
-      'WKWebView must receive the native drag press on the fixture track');
+      assert.fail('WKWebView did not receive a native drag press on the fixture track after three attempts');
+    } finally {
+      captureEvidence();
+      await state(`(() => {
+        for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+          window.removeEventListener(type, window.__desktopOutgoingListener, true);
+        }
+        return true;
+      })()`).catch(() => {}); // The failed webview may no longer answer.
+    }
   }
   const sources=path.join(root,`Finder Sources ${path.basename(root)}`);
   mkdirSync(sources);
