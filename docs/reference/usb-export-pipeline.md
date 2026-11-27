@@ -420,7 +420,7 @@ stick's manifest records (when the manifest's `db_id` matches).
 `for_stick_inspected(.., recover_device: false)` does the same without
 recovery, for the preview.
 
-### `write_export_with_phase`
+### `write_export`
 
 1. Refuses if the destination is not a directory (`NotFound`).
 2. Refuses if `rbl_db::is_rekordbox_app_running()` (`ReadOnly`). See the
@@ -439,8 +439,10 @@ recovery, for the preview.
    EXPORT_CACHE, expected_volume, verify_all }`. `ExportError::Cancelled`
    maps to `ErrorKind::Cancelled`. Every other export error maps to
    `Internal`, with the error text as the message.
-6. A report that is not `verified` is an error. Otherwise it emits
-   `finalizing` and returns the `ExportReportDto`.
+6. A report that is not `verified` is an error. Otherwise it returns the
+   `ExportReportDto`. After committing the retained publication, the export
+   library emits `finalizing` before it verifies the saved databases, seals
+   the receipt, and retires the journal.
 
 So the Tauri layer **does** create `DEVSETTING.DAT` on a stick that has none
 when stick defaults are passed. The `rbl-export` crate itself never creates
@@ -856,7 +858,7 @@ No code path branches on FAT32 versus exFAT. What the code does:
   `rekordboxAgent`. Writes to the library itself wait for both, because the
   agent syncs the library.
 - `is_rekordbox_app_running()` checks for the app only. USB writes
-  (`reserve_export`, `write_export_with_phase`, and stick playlist edits in
+  (`reserve_export`, `write_export`, and stick playlist edits in
   `device_library.rs`) use this check. Its comment records that rekordbox
   rewrote a stick's databases within a minute of seeing the stick, while the
   agent changed no file on a stick [OBS 2026-10-09, rekordbox 7.2.14,

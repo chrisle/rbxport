@@ -2294,6 +2294,13 @@ fn export_cancellable_inner(
         }
         return Err(error.into());
     }
+    progress(&ExportProgress {
+        stage: "finalizing",
+        reused: report.reused,
+        copied: report.tracks_added + report.tracks_updated,
+        converted: report.converted,
+        ..Default::default()
+    });
     let validate = (|| -> Result<()> {
         incremental::recheck();
         save_phase("published_verify", || -> Result<()> {

@@ -121,8 +121,31 @@ fn successful_export_records_fixed_save_subphases_without_paths_and_repeat_does_
     let usb = tempfile::tempdir().unwrap();
     let track = fixture(source.path());
     let original = std::fs::read(&track.source_path).unwrap();
-    let (report, log) = capture(|| export(usb.path(), &track, &mut |_| {}));
+    let mut stages = Vec::new();
+    let mut copy_complete = false;
+    let (report, log) = capture(|| {
+        export(usb.path(), &track, &mut |progress| {
+            if progress.stage == "copying" && progress.unit == "bytes"
+                && progress.bytes_total > 0 && progress.bytes_done == progress.bytes_total
+            {
+                copy_complete = true;
+            }
+            if progress.stage == "database" {
+                assert!(copy_complete, "the copied bytes reach 100% before the save stages");
+            }
+            if matches!(progress.stage, "database" | "verifying" | "publishing" | "finalizing") {
+                stages.push(progress.stage);
+            }
+            if progress.stage == "finalizing" {
+                assert!(rbl_core::durable::Publication::validation_pending(
+                    usb.path(),
+                    ".rbxport-publication",
+                ));
+            }
+        })
+    });
     let report = report.unwrap();
+    assert_eq!(stages, ["database", "verifying", "publishing", "finalizing"]);
     assert!(report.verified);
     assert!(
         log.contains("USB sync completed"),
@@ -149,7 +172,14 @@ fn successful_export_records_fixed_save_subphases_without_paths_and_repeat_does_
         assert_eq!(pair[1]["ok"], "true");
     }
     assert_fixed_fields(&records);
-    let (repeat, repeated_log) = capture(|| export(usb.path(), &track, &mut |_| {}));
+    let (repeat, repeated_log) = capture(|| {
+        export(usb.path(), &track, &mut |progress| {
+            assert_ne!(
+                progress.stage, "finalizing",
+                "a no-op did not publish a new generation"
+            );
+        })
+    });
     assert!(repeat.unwrap().up_to_date);
     assert_eq!(phases(&repeated_log), []);
     assert_eq!(std::fs::read(&track.source_path).unwrap(), original);
@@ -175,6 +205,7 @@ fn publication_failure_records_only_fixed_fields_and_preserves_the_old_generatio
     let injected = std::cell::Cell::new(false);
     let (result, log) = capture(|| {
         export(usb.path(), &track, &mut |progress| {
+            assert_ne!(progress.stage, "finalizing", "publication failed before read-back");
             if progress.stage == "publishing" {
                 let staging = std::fs::read_dir(usb.path())
                     .unwrap()
@@ -224,8 +255,12 @@ fn published_verification_failure_is_logged_before_unchanged_rollback() {
         .collect();
     track.rating = 3;
     let injected = std::cell::Cell::new(false);
+    let mut finalizing = false;
     let (result, log) = capture(|| {
         export(usb.path(), &track, &mut |progress| {
+            if progress.stage == "finalizing" {
+                finalizing = true;
+            }
             if progress.stage == "publishing" {
                 let staging = std::fs::read_dir(usb.path())
                     .unwrap()
@@ -253,6 +288,7 @@ fn published_verification_failure_is_logged_before_unchanged_rollback() {
         })
     });
     assert!(injected.get());
+    assert!(finalizing, "the phase starts before published verification can fail");
     let error = result.unwrap_err();
     assert!(matches!(error, rbl_export::ExportError::Publication(rbl_export::PublicationError::PreviousLibraryRestored(_))));
     assert!(error.to_string().contains("the previous library was restored"));

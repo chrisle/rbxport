@@ -2417,7 +2417,7 @@ fn write_export_registered<R: tauri::Runtime>(
     };
     emit("preparing", 0, String::new(), None);
     let done = std::cell::Cell::new(0);
-    let result = write_export_with_phase(
+    let result = write_export(
         destination, selection, defaults, compatibility_format,
         reservation.volume.as_ref(),
         reservation.verify_all,
@@ -2426,7 +2426,6 @@ fn write_export_registered<R: tauri::Runtime>(
             done.set(u32::try_from(p.done).unwrap_or(u32::MAX));
             emit(p.stage, done.get(), p.title.clone(), Some(p));
         },
-        &mut |phase| emit(phase, 0, String::new(), None),
         &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
     )
     .map_err(|error| disconnected_during_export(destination, error));
@@ -2553,7 +2552,7 @@ fn media_failed(error: &std::io::Error) -> bool {
 }
 
 #[allow(clippy::too_many_arguments, reason = "export options and independent progress/cancellation callbacks")]
-fn write_export_with_phase(
+fn write_export(
     destination: &std::path::Path,
     selection: &ExportSelection,
     defaults: Option<&crate::device_settings::StickDefaultsDto>,
@@ -2562,7 +2561,6 @@ fn write_export_with_phase(
     verify_all: bool,
     xdj_r1_support: bool,
     progress: &mut dyn FnMut(&rbl_export::ExportProgress),
-    phase: &mut dyn FnMut(&'static str),
     cancelled: &dyn Fn() -> bool,
 ) -> AppResult<ExportReportDto> {
     if !destination.is_dir() {
@@ -2615,7 +2613,6 @@ fn write_export_with_phase(
     )
     .map_err(|e| sync_error(&e))?;
     if !report.verified { return Err(AppError::internal("The exported generation was not verified.")); }
-    phase("finalizing");
 
     Ok(ExportReportDto {
         up_to_date: report.up_to_date,
@@ -5616,13 +5613,13 @@ mod tests {
     fn export_playlist_to(state: &crate::state::AppState, location: &rbl_db::LibraryLocation, stick: &std::path::Path, playlist: &str) {
         let library = state.library().unwrap();
         let selection = super::playlist_export_selection(state, &library, &location.share_root, stick, playlist, false).unwrap();
-        super::write_export_with_phase(stick, &selection, None, None, None, false, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export(stick, &selection, None, None, None, false, false, &mut |_| {}, &|| false).unwrap();
     }
 
     fn export_track_to(state: &crate::state::AppState, location: &rbl_db::LibraryLocation, stick: &std::path::Path, track: &str) {
         let library = state.library().unwrap();
         let selection = super::track_export_selection(state, &library, &location.share_root, stick, &[track.to_owned()]).unwrap();
-        super::write_export_with_phase(stick, &selection, None, None, None, false, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export(stick, &selection, None, None, None, false, false, &mut |_| {}, &|| false).unwrap();
     }
 
     /// Export Playlist from the tree adds the playlist to what the stick
@@ -5742,7 +5739,7 @@ mod tests {
         let library = state.library().unwrap();
         let everything: Vec<String> = [&first, &second, &in_first, &in_second].iter().map(|s| (*s).clone()).collect();
         let selection = super::ExportSelection::from_playlists(&state, &library, &location.share_root, &everything, false).unwrap();
-        super::write_export_with_phase(&stick, &selection, None, None, None, false, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export(&stick, &selection, None, None, None, false, false, &mut |_| {}, &|| false).unwrap();
 
         let order: Vec<String> = on_stick(&stick).into_iter().map(|(id, _)| id).collect();
         let expected = [second.clone(), in_second.clone(), first.clone(), in_first.clone()];
@@ -5782,7 +5779,7 @@ mod tests {
         let options = rbl_export::ExportOptions { sync: Some(&selection.sync), ..Default::default() };
         let plan = rbl_export::plan::preview(&stick, &selection.tracks, &selection.playlists, &selection.my_tags, &options).unwrap();
         assert!(plan.estimate.tracks_new > 0, "the estimate counts the tracks");
-        super::write_export_with_phase(&stick, &selection, None, None, None, false, false, &mut |_| {}, &mut |_| {}, &|| false).unwrap();
+        super::write_export(&stick, &selection, None, None, None, false, false, &mut |_| {}, &|| false).unwrap();
         assert!(rbl_export::verify(&stick).unwrap().is_ok());
     }
 
