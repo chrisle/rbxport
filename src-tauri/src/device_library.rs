@@ -231,6 +231,7 @@ pub(crate) async fn color_names(path: String, format: String) -> AppResult<Vec<S
 pub(crate) fn device_error(e: &rbl_export::ExportError) -> AppError {
     match e {
         rbl_export::ExportError::Conflict(message) => AppError::new(ErrorKind::Malformed, message.clone()),
+        rbl_export::ExportError::Publication(error) => AppError::new(ErrorKind::Malformed, error.to_string()),
         rbl_export::ExportError::DeviceGone => AppError::new(ErrorKind::NotFound, "That device is no longer connected."),
         other => AppError::new(ErrorKind::Internal, "The device library could not be read or written.").with_detail(other.to_string()),
     }

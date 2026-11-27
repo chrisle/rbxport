@@ -211,6 +211,8 @@ fn published_verification_failure_is_logged_before_unchanged_rollback() {
     let usb = tempfile::tempdir().unwrap();
     let mut track = fixture(source.path());
     export(usb.path(), &track, &mut |_| {}).unwrap();
+    let unrelated = usb.path().join("mix notes.txt");
+    std::fs::write(&unrelated, b"not part of the export").unwrap();
     let paths = [
         "PIONEER/rekordbox/export.pdb",
         "PIONEER/rekordbox/exportLibrary.db",
@@ -251,13 +253,14 @@ fn published_verification_failure_is_logged_before_unchanged_rollback() {
         })
     });
     assert!(injected.get());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("the previous library was restored"));
+    let error = result.unwrap_err();
+    assert!(matches!(error, rbl_export::ExportError::Publication(rbl_export::PublicationError::PreviousLibraryRestored(_))));
+    assert!(error.to_string().contains("the previous library was restored"));
     for (path, bytes) in paths.iter().zip(before) {
         assert_eq!(std::fs::read(usb.path().join(path)).unwrap(), bytes);
     }
+    assert_eq!(std::fs::read(unrelated).unwrap(), b"not part of the export");
+    assert!(!rbl_export::recovery_pending(usb.path()));
     assert!(rbl_export::verify(usb.path()).unwrap().is_ok());
     let records = phases(&log);
     assert_eq!(records.len(), 6, "{records:?}");

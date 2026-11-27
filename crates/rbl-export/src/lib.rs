@@ -55,12 +55,33 @@ pub enum ExportError {
     DeviceGone,
     #[error("USB sync conflict: {0}")]
     Conflict(String),
+    #[error("USB sync conflict: {0}")]
+    Publication(#[from] PublicationError),
     #[error("nothing to export")]
     Empty,
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("could not write exportLibrary.db: {0}")]
     OneLibrary(String),
+}
+
+/// A save failure together with the outcome of restoring the old library.
+#[derive(Debug, thiserror::Error)]
+pub enum PublicationError {
+    #[error("Publication failed: {cause}; recovery required: {rollback}")]
+    CommitRecoveryRequired {
+        #[source]
+        cause: std::io::Error,
+        rollback: std::io::Error,
+    },
+    #[error("{cause}; recovery required: {rollback}")]
+    VerificationRecoveryRequired {
+        #[source]
+        cause: Box<ExportError>,
+        rollback: std::io::Error,
+    },
+    #[error("{0}; the previous library was restored")]
+    PreviousLibraryRestored(#[source] Box<ExportError>),
 }
 
 // Keep actual filesystem failures typed until the app classifies them. SQL,
@@ -2268,7 +2289,7 @@ fn export_cancellable_inner(
     if let Err(error) = save_phase("publication", || publication.commit_retained(&files)) {
         if rbl_core::durable::Publication::validation_pending(destination, PUBLICATION) {
             if let Err(rollback) = publication.rollback() {
-                return Err(ExportError::Conflict(format!("Publication failed: {error}; recovery required: {rollback}")));
+                return Err(PublicationError::CommitRecoveryRequired { cause: error, rollback }.into());
             }
         }
         return Err(error.into());
@@ -2294,9 +2315,9 @@ fn export_cancellable_inner(
     })();
     if let Err(error) = validate {
         if let Err(rollback) = publication.rollback() {
-            return Err(ExportError::Conflict(format!("{error}; recovery required: {rollback}")));
+            return Err(PublicationError::VerificationRecoveryRequired { cause: Box::new(error), rollback }.into());
         }
-        return Err(ExportError::Conflict(format!("{error}; the previous library was restored")));
+        return Err(PublicationError::PreviousLibraryRestored(Box::new(error)).into());
     }
     save_phase("finalization", || -> Result<()> {
         publication.finalize()?;

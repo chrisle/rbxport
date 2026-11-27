@@ -2460,16 +2460,29 @@ fn sync_error(e: &rbl_export::ExportError) -> AppError {
             ErrorKind::ReadOnly,
             "Not enough space available on the device",
         ).with_detail(format!("({io})")),
-        rbl_export::ExportError::Io(io) if media_failed(io) => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
-            .with_detail(format!("({io})")),
-        // The export's own name for a read or write the stick failed (EIO,
-        // ENXIO, ENODEV on Unix; not ready or not connected on Windows, never
-        // access denied or write protected). A stick that is gone afterwards
-        // is reported as unplugged by `disconnected_during_export`; one still
-        // mounted failed.
-        rbl_export::ExportError::DeviceGone => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
+        _ if export_media_failed(e) => AppError::new(ErrorKind::Internal, MEDIA_FAILED)
             .with_detail(format!("({e})")),
         _ => AppError::new(ErrorKind::Internal, e.to_string()),
+    }
+}
+
+fn export_media_failed(error: &rbl_export::ExportError) -> bool {
+    use rbl_export::{ExportError, PublicationError};
+    match error {
+        ExportError::Io(io) => media_failed(io),
+        // The exporter also uses this for a read or write failure on media
+        // that is still mounted. The caller checks for a disconnected USB.
+        ExportError::DeviceGone => true,
+        ExportError::Publication(error) => match error {
+            PublicationError::CommitRecoveryRequired { cause, rollback } => {
+                media_failed(cause) || media_failed(rollback)
+            }
+            PublicationError::VerificationRecoveryRequired { cause, rollback } => {
+                export_media_failed(cause) || media_failed(rollback)
+            }
+            PublicationError::PreviousLibraryRestored(cause) => export_media_failed(cause),
+        },
+        _ => false,
     }
 }
 
@@ -5439,6 +5452,43 @@ mod tests {
         #[cfg(any(unix, windows))]
         assert!(super::media_failed(&std::io::Error::new(std::io::ErrorKind::AlreadyExists,
             std::io::Error::from_raw_os_error(media_code))));
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn publication_recovery_keeps_media_failure_and_recovery_details() {
+        use rbl_export::{ExportError, PublicationError};
+        use std::io::Error;
+
+        #[cfg(unix)]
+        let media_code = 5;
+        #[cfg(windows)]
+        let media_code = 1117;
+        let media = || Error::from_raw_os_error(media_code);
+        let conflict = || ExportError::Conflict(format!("Database disagrees with Track (os error {media_code})"));
+        let permission = || Error::new(std::io::ErrorKind::PermissionDenied, "could not write the rollback marker");
+        for failure in [
+            PublicationError::CommitRecoveryRequired { cause: media(), rollback: permission() },
+            PublicationError::VerificationRecoveryRequired { cause: Box::new(conflict()), rollback: media() },
+            PublicationError::PreviousLibraryRestored(Box::new(media().into())),
+        ] {
+            let failure = ExportError::from(failure);
+            let error = super::sync_error(&failure);
+            assert_eq!(error.message, super::MEDIA_FAILED);
+            assert_eq!(error.detail, Some(format!("({failure})")));
+        }
+        for failure in [
+            PublicationError::CommitRecoveryRequired { cause: permission(), rollback: permission() },
+            PublicationError::VerificationRecoveryRequired { cause: Box::new(conflict()), rollback: permission() },
+            PublicationError::PreviousLibraryRestored(Box::new(conflict())),
+        ] {
+            let expected_device_message = failure.to_string();
+            let failure = ExportError::from(failure);
+            assert_eq!(super::sync_error(&failure).message, failure.to_string());
+            let device_error = crate::device_library::device_error(&failure);
+            assert_eq!(device_error.kind, crate::error::ErrorKind::Malformed);
+            assert_eq!(device_error.message, expected_device_message);
+        }
     }
 
     /// A track whose analysis folder is gone from disk is exported without
