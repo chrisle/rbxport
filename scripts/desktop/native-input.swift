@@ -47,6 +47,19 @@ func setFrame(_ window: AXUIElement, _ position: CGPoint, _ dimensions: CGSize) 
     if let value = AXValueCreate(.cgSize, &s) { AXUIElementSetAttributeValue(window,kAXSizeAttribute as CFString,value) }
 }
 func windows(_ pid: pid_t) -> [AXUIElement] { attribute(AXUIElementCreateApplication(pid),kAXWindowsAttribute) as? [AXUIElement] ?? [] }
+func normalVisibleWindows() -> [[String: Any]] {
+    let visible = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    return visible.filter { $0[kCGWindowLayer as String] as? Int == 0 }
+}
+func windowOwner(at screenPoint: CGPoint, in visible: [[String: Any]]) -> pid_t? {
+    for window in visible {
+        guard let bounds = window[kCGWindowBounds as String] as? [String: Any],
+              let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary), frame.contains(screenPoint),
+              let owner = window[kCGWindowOwnerPID as String] as? pid_t else { continue }
+        return owner
+    }
+    return nil
+}
 let args = Array(CommandLine.arguments.dropFirst())
 if args == ["--preflight"] {
     print("{\"accessibility\":\(AXIsProcessTrusted()),\"postEvents\":\(CGPreflightPostEventAccess())}")
@@ -74,10 +87,22 @@ if args.count == 2, args[0] == "--layout", let pid = Int32(args[1]), let window 
 if args.count >= 7, args[0] == "--drag-out", let pid = Int32(args[1]), let x = Double(args[2]), let y = Double(args[3]),
    let viewport = Double(args[4]), let toX = Double(args[5]), let toY = Double(args[6]) {
     guard let appWindow = windows(pid).first, let appOrigin = point(appWindow,kAXPositionAttribute), let appSize = size(appWindow) else { fail("No test app window") }
+    let appAX = AXUIElementCreateApplication(pid)
+    AXUIElementSetAttributeValue(appAX,kAXFrontmostAttribute as CFString,kCFBooleanTrue)
     AXUIElementPerformAction(appWindow,kAXRaiseAction as CFString)
+    guard wait({ NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }) else { fail("Could not focus the test window for an outgoing drag") }
     let top = appOrigin.y + appSize.height - viewport
     let from = CGPoint(x:appOrigin.x+x,y:top+y)
     let to = CGPoint(x:appOrigin.x+toX,y:top+toY)
+    let visible = normalVisibleWindows()
+    guard windowOwner(at: from, in: visible) == pid, windowOwner(at: to, in: visible) == pid else {
+        fail("Outgoing drag points must fall on the test window")
+    }
+    // Finder was active during the preceding drop. A click on the fixture's
+    // neutral toolbar gives its webview focus before the actual track press.
+    mouse(.mouseMoved,to); Thread.sleep(forTimeInterval:0.1)
+    mouse(.leftMouseDown,to); Thread.sleep(forTimeInterval:0.1)
+    mouse(.leftMouseUp,to); Thread.sleep(forTimeInterval:0.6)
     mouse(.mouseMoved,from); Thread.sleep(forTimeInterval:0.15)
     mouse(.leftMouseDown,from); Thread.sleep(forTimeInterval:0.2)
     for step in 1...45 {
@@ -123,7 +148,8 @@ defer {
     }
 }
 setFrame(finderWindow, CGPoint(x:0,y:50),CGSize(width:480,height:650))
-finder.activate(options: [.activateAllWindows])
+finder.activate()
+AXUIElementPerformAction(finderWindow,kAXRaiseAction as CFString)
 var item: AXUIElement?
 guard wait({ item = selected(finderWindow,names:files.flatMap { [$0.lastPathComponent,$0.deletingPathExtension().lastPathComponent] }); return item != nil }), let item, let origin = point(item,kAXPositionAttribute), let itemSize = size(item) else { fail("Finder has no selected fixture row or icon") }
 // Node measured this DOM target after fixing the viewport and screen position.
@@ -132,17 +158,12 @@ let start = CGPoint(x:origin.x+min(itemSize.width/2,150),y:origin.y+itemSize.hei
 let destination = CGPoint(x: appOrigin.x+x, y:appOrigin.y+finalSize.height-viewport+y)
 let finderPosition = point(finderWindow,kAXPositionAttribute)
 let finderSize = size(finderWindow)
-let visibleWindows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+let visibleWindows = normalVisibleWindows()
 func windowAt(_ screenPoint: CGPoint) -> String {
-    for window in visibleWindows where window[kCGWindowLayer as String] as? Int == 0 {
-        guard let bounds = window[kCGWindowBounds as String] as? [String: Any],
-              let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary), frame.contains(screenPoint),
-              let owner = window[kCGWindowOwnerPID as String] as? Int32 else { continue }
-        if owner == pid { return "rbxport" }
-        if owner == finder.processIdentifier { return "finder" }
-        return "other"
-    }
-    return "none"
+    guard let owner = windowOwner(at: screenPoint, in: visibleWindows) else { return "none" }
+    if owner == pid { return "rbxport" }
+    if owner == finder.processIdentifier { return "finder" }
+    return "other"
 }
 let startLayer0Owner = windowAt(start)
 let destinationLayer0Owner = windowAt(destination)
@@ -154,24 +175,27 @@ if startLayer0Owner == "finder" {
 let selectedRole = attribute(item,kAXRoleAttribute) as? String ?? ""
 let sourceHitRole = sourceHit.flatMap { attribute($0,kAXRoleAttribute) as? String } ?? ""
 let sourceHitIsExactSelectedElement = sourceHit.map { CFEqual($0,item) } ?? false
-mouse(.mouseMoved,start); Thread.sleep(forTimeInterval:0.15)
-mouse(.leftMouseDown,start); Thread.sleep(forTimeInterval:0.2)
-for step in 1...45 {
-    let t = Double(step)/45
-    mouse(.leftMouseDragged,CGPoint(x:start.x+(destination.x-start.x)*t,y:start.y+(destination.y-start.y)*t))
-    Thread.sleep(forTimeInterval:0.025)
+let nativeDrag = startLayer0Owner == "finder" && destinationLayer0Owner == "rbxport"
+if nativeDrag {
+    mouse(.mouseMoved,start); Thread.sleep(forTimeInterval:0.15)
+    mouse(.leftMouseDown,start); Thread.sleep(forTimeInterval:0.2)
+    for step in 1...45 {
+        let t = Double(step)/45
+        mouse(.leftMouseDragged,CGPoint(x:start.x+(destination.x-start.x)*t,y:start.y+(destination.y-start.y)*t))
+        Thread.sleep(forTimeInterval:0.025)
+    }
+    Thread.sleep(forTimeInterval:0.4)
+    if cancel {
+        let down = CGEvent(keyboardEventSource:nil,virtualKey:53,keyDown:true)
+        let up = CGEvent(keyboardEventSource:nil,virtualKey:53,keyDown:false)
+        down?.post(tap:.cghidEventTap); up?.post(tap:.cghidEventTap)
+        Thread.sleep(forTimeInterval:0.1)
+    }
+    mouse(.leftMouseUp,destination)
+    Thread.sleep(forTimeInterval:0.7)
 }
-Thread.sleep(forTimeInterval:0.4)
-if cancel {
-    let down = CGEvent(keyboardEventSource:nil,virtualKey:53,keyDown:true)
-    let up = CGEvent(keyboardEventSource:nil,virtualKey:53,keyDown:false)
-    down?.post(tap:.cghidEventTap); up?.post(tap:.cghidEventTap)
-    Thread.sleep(forTimeInterval:0.1)
-}
-mouse(.leftMouseUp,destination)
-Thread.sleep(forTimeInterval:0.7)
 let evidence: [String: Any] = [
-    "nativeDrag": true, "cancelled": cancel, "files": files.count,
+    "nativeDrag": nativeDrag, "cancelled": cancel, "files": files.count,
     "finderWindowReused": reused,
     "start": ["x": start.x, "y": start.y],
     "destination": ["x": destination.x, "y": destination.y],

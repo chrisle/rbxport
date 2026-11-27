@@ -58,19 +58,58 @@ export async function expanded(c) {
     const drops=await state('window.__desktopDrops');
     const drags=await state('window.__desktopDrags');
     writeFileSync(artifact, JSON.stringify({...details, evidence, drags, drops}, null, 2));
+    assert.equal(evidence.nativeDrag, true, 'Native drag points must fall on Finder and the test window');
     assert.ok(drags.some(e=>e.trusted && e.types.includes('Files')),'A trusted native file drag must enter the test window');
     if(cancel) assert.equal(drops.length,0,'Cancelled drag must not reach a drop handler');
     else if(ignored) {assert.ok(drops.length<=1);if(drops.length)assert.equal(drops[0].trusted,true);}
     else { assert.equal(drops.length,1,'OS must deliver exactly one drop'); assert.equal(drops[0].trusted,true,'OS drop must be trusted'); assert.ok(drops[0].types.includes('Files')); }
   }
-  // A real outgoing track drag from the first All Tracks row, released on the
+  // A real outgoing drag of a playable fixture track, released on the
   // toolbar (a completed drag that lands nowhere) or cancelled with Escape.
   async function trackDragOut({cancel=false}={}) {
     command(native,['--layout',String(c.pid())],{timeout:30000});
     await until(()=>state('innerWidth===1200 && innerHeight===800'),'fixed 1200 × 800 viewport');
-    const at = await state(`(() => {const cell=document.querySelector('[role="gridcell"][data-col="title"]'); const bar=document.querySelector('header'); if(!cell||!bar)throw Error('Missing track row or toolbar'); const r=cell.getBoundingClientRect(), h=bar.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,toX:h.x+h.width/2,toY:h.y+h.height/2,height:innerHeight};})()`);
+    const at = await state(`(() => {
+      const cell = [...document.querySelectorAll('[data-testid="track-scroll"] [role="gridcell"][data-col="title"]')]
+        .find(item => item.textContent.trim() === 'Fixture Track 0');
+      const bar = document.querySelector('header');
+      if (!cell || !bar) throw Error('Missing track row or toolbar');
+      cell.scrollIntoView({block: 'nearest', inline: 'nearest'});
+      const r = cell.getBoundingClientRect();
+      const h = bar.getBoundingClientRect();
+      const x = r.x + r.width / 2;
+      const y = r.y + r.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      if (!cell.contains(hit) || hit.closest('input, button, [contenteditable=true]')) {
+        throw Error('Track drag source is outside the visible, draggable track cell');
+      }
+      const toolbarY = h.y + h.height / 2;
+      const toolbarX = [.5, .4, .6, .3, .7].map(part => h.x + h.width * part).find(point => {
+        const target = document.elementFromPoint(point, toolbarY);
+        return bar.contains(target) && !target.closest('a, button, input, select, [role="button"], [contenteditable=true]');
+      });
+      if (toolbarX === undefined) throw Error('No neutral toolbar point for the outgoing drag');
+      window.__desktopOutgoingEvents = [];
+      window.__desktopOutgoingListener ??= e => {
+        if (!e.isTrusted || (e.type === 'pointermove' && !e.buttons)) return;
+        const cell = e.target instanceof Element ? e.target.closest('[role="gridcell"]')?.getAttribute('data-col') : null;
+        window.__desktopOutgoingEvents.push({type: e.type, x: e.clientX, y: e.clientY, buttons: e.buttons, cell});
+      };
+      for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+        window.addEventListener(type, window.__desktopOutgoingListener, true);
+      }
+      return {x, y, toX: toolbarX, toY: toolbarY, height: innerHeight};
+    })()`);
     const evidence = JSON.parse(command(native,['--drag-out',String(c.pid()),String(at.x),String(at.y),String(at.height),String(at.toX),String(at.toY),...(cancel?['--cancel']:[])],{timeout:30000}));
-    writeFileSync(path.join(out,`track-drag-out-${c.resultCount()}.json`),JSON.stringify({cancel,at,evidence},null,2));
+    const pointerEvents = await state(`(() => {
+      for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+        window.removeEventListener(type, window.__desktopOutgoingListener, true);
+      }
+      return window.__desktopOutgoingEvents;
+    })()`);
+    writeFileSync(path.join(out,`track-drag-out-${c.resultCount()}.json`),JSON.stringify({cancel,at,evidence,pointerEvents},null,2));
+    assert.ok(pointerEvents.some(e => e.type === 'pointerdown' && e.cell === 'title' && e.buttons === 1),
+      'WKWebView must receive the native drag press on the fixture track');
   }
   const sources=path.join(root,`Finder Sources ${path.basename(root)}`);
   mkdirSync(sources);
@@ -116,6 +155,17 @@ export async function expanded(c) {
     await verifyFinderImport(file, allTracksTree);
   });
 
+  const dropAfterTrackDrag = (cancel = false) => scenario(`a Finder drop still lands after a ${cancel ? 'cancelled' : 'completed'} outgoing track drag`, async () => {
+    await collection();
+    await trackDragOut({cancel});
+    const before = database().tracks.length;
+    const file = path.join(sources, cancel ? 'After cancelled drag out.wav' : 'After drag out.wav');
+    copyFileSync(single, file);
+    await nativeDrop([file], fileDropList('all'));
+    await until(() => database().tracks.length === before + 1, 'drop after an outgoing drag reaches the library');
+    assert.ok(held(file));
+  });
+
   if (finderOnly) {
     await finderPreflight();
     const newPlaylist = 'New playlist';
@@ -147,6 +197,8 @@ export async function expanded(c) {
     await clickText(tree, newPlaylist);
     await waitText(title, `${newPlaylist} (2 Tracks)`);
     await dropOnAllTracksTree();
+    await dropAfterTrackDrag();
+    await dropAfterTrackDrag(true);
     return;
   }
 
@@ -246,24 +298,8 @@ export async function expanded(c) {
     await until(()=>database().tracks.length===before+1,'dropped file reaches the library');
     assert.ok(held(file));
   });
-  await scenario('a Finder drop still lands after a completed outgoing track drag',async()=> {
-    await collection();
-    await trackDragOut();
-    const before=database().tracks.length;
-    const file=path.join(sources,'After drag out.wav');copyFileSync(single,file);
-    await nativeDrop([file],'[data-testid="track-scroll"]');
-    await until(()=>database().tracks.length===before+1,'drop after an outgoing drag reaches the library');
-    assert.ok(held(file));
-  });
-  await scenario('a Finder drop still lands after a cancelled outgoing track drag',async()=> {
-    await collection();
-    await trackDragOut({cancel:true});
-    const before=database().tracks.length;
-    const file=path.join(sources,'After cancelled drag out.wav');copyFileSync(single,file);
-    await nativeDrop([file],'[data-testid="track-scroll"]');
-    await until(()=>database().tracks.length===before+1,'drop after a cancelled outgoing drag reaches the library');
-    assert.ok(held(file));
-  });
+  await dropAfterTrackDrag();
+  await dropAfterTrackDrag(true);
   await scenario('missing audio is refused without replacing the loaded deck',async()=> {
     await collection();await load('Fixture Track 0');
     await app().click('[role="gridcell"][data-col="title"]',{text:'Track 003',event:'dblclick'});

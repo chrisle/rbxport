@@ -13,8 +13,9 @@ packaging and publication. Pull-request checks and manual validation omit it.
 stamp. `--expanded-only` is a development filter. Run
 `pnpm desktop:test --finder-only` on an idle desktop to verify genuine Finder
 audio drops onto an open playlist, a playlist tree row, the open All Tracks
-list, and the All Tracks tree row. This mode checks the file path and playlist
-membership in SQLCipher without running the other desktop scenarios. Run it
+list, and the All Tracks tree row. It verifies incoming drops after completed
+and cancelled outgoing drags, and checks file paths and playlist membership in
+SQLCipher without running the other desktop scenarios. Run it
 without `--no-build` the first time to build the app and fixture helper. CI runs
 the full suite.
 The main WKWebView is asserted to be **1200 × 800 logical pixels**, with the
