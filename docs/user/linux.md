@@ -33,10 +33,20 @@ has been tried with a physical stick or player on Linux.
 5. [OBS `src-tauri/src/lib.rs` `spawn_library_load`] The library is loaded on a
    background thread, so the window is not blocked while it is read.
 
-If the window does not appear at all, or the whole machine becomes
-unresponsive, that is not the flow above. See
-[issue #848](https://github.com/chrisle/rbxport/issues/848); the cause of that
-report is [UNKNOWN] (see the PR notes for what was checked).
+After you choose **Create**, the dialog stays open while the library loads.
+It closes when the empty collection is ready. If creation fails, the dialog
+shows an error. If the database is created but cannot be opened, RBXport
+closes the dialog and shows a library load error.
+
+[OBS] A first-run AppImage test in Fedora 44 userspace started with an empty
+home directory, created and displayed an empty collection, then reopened it
+on the next launch. The test used Xvfb and AppImage extract-and-run mode.
+
+If the app or desktop freezes, report the RBXport version, Fedora version,
+desktop session (Wayland or X11), and whether the freeze happened before or
+after selecting **Create**. If you can reproduce it from a terminal, include
+any error output. The cause of the desktop freeze in
+[issue #848](https://github.com/chrisle/rbxport/issues/848) remains [UNKNOWN].
 
 ## Copying `master.db` from another computer is optional
 
@@ -95,8 +105,8 @@ rekordbox is running.
   player has loaded a stick written by this pipeline, and Linux physical
   sticks are unverified. Emulator results are not physical-device results.
 - [OBS] RBXport does not format sticks on Linux.
-- [UNKNOWN] Behaviour on specific distributions (including Fedora), kernel
-  filesystem drivers for exFAT or HFS+, and auto-mount locations other than
-  those listed has not been tested.
+- [UNKNOWN] Native Fedora desktop startup with the AppImage mounted normally,
+  kernel filesystem drivers for exFAT or HFS+, and auto-mount locations other
+  than those listed remain unverified here.
 - RBXport is not performance software and does not register controllers
   ([FAQ](faq.md)).
