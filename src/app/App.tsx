@@ -74,6 +74,7 @@ import { useUpdater } from "@/store/useUpdater";
 import { UpdateReadyNotice } from "@/views/update/UpdateReadyNotice";
 import { MasterOutputProvider, MasterOutputConnection, useMasterControls, useMasterDisplay } from "@/store/MasterOutput";
 import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout";
+import { errorMessage } from "@/lib/errorMessage";
 import { FIELD_LABEL } from "@/views/info/fieldLabel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { RightRail } from "@/views/browser/RightRail";
@@ -703,6 +704,14 @@ function AppBody() {
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
+  const changeLayout = useCallback((next: PlayerLayout) => {
+    if (layout === "two" && deckCount(next) < 2) {
+      // Pausing in the engine retains deck B's track and position while its
+      // view is hidden. See docs/reference/layout-hidden-decks.md.
+      void getBackend().then(backend => backend.deckPause("b")).catch(error => refuse(errorMessage(error)));
+    }
+    setLayout(next);
+  }, [layout, refuse]);
   const deviceLibraryError = useEventCallback((text: string) => refuse(t(text)));
   const deviceLibraries = useDeviceLibraries(devices, deviceLibraryError);
   const stopJob = useCallback((id: number) => jobs.stop(id), [jobs]);
@@ -2548,7 +2557,7 @@ function AppBody() {
       return;
     }
     if (outcome.action.startsWith("layout-")) {
-      setLayout(asLayout(outcome.action.slice("layout-".length)));
+      changeLayout(asLayout(outcome.action.slice("layout-".length)));
       return;
     }
     if (outcome.action === "missing") {
@@ -2559,7 +2568,7 @@ function AppBody() {
   }, [
     readOnly, advancedPrefs.protectLibrary, importFromMenu, importFolderFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
     openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider, openReport,
-    editHistory, runLibraryHistory, showMissingFiles,
+    editHistory, runLibraryHistory, showMissingFiles, changeLayout,
   ]);
 
   // The Track and Playlist menus' greyed items, worked out from the focus
@@ -3382,7 +3391,7 @@ function AppBody() {
         clock={clock}
         onOpenSettings={openViewSettings}
         layout={layout}
-        onLayoutChange={setLayout}
+        onLayoutChange={changeLayout}
       />
       {/* Full Browser draws no deck at all, and no gutter under one. */}
       {deckCount(layout) > 0 ? (

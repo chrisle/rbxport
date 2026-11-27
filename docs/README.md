@@ -42,6 +42,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 - [Analysis crate](../crates/rbl-analysis/README.md): algorithm reading path and evaluation tools.
 - [Waveform calibration](reference/waveform-analysis.md): measured overview behavior and its limits.
 - [Waveform hover destinations](reference/waveform-hover.md): independent seek feedback and unchanged detail-waveform gestures.
+- [Layout switches and the hidden deck](reference/layout-hidden-decks.md): what rekordbox does to the deck a layout hides, the static evidence, and the pause RBXport copies (#548).
 - [Playback crate](../crates/rbl-deck/README.md): thread model, code map, and test workflow.
 - [Playback test fixtures](../crates/rbl-deck/tests/fixtures/README.md): generated audio and regeneration.
 - [Licensing](../LICENSING.md): bundled library terms.
