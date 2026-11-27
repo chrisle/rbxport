@@ -12,12 +12,17 @@ import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
-const reuse = process.argv.includes('--no-build');
-const expandedOnly=process.argv.includes('--expanded-only');
+const args = process.argv.slice(2);
+const reuse = args.includes('--no-build');
+const expandedOnly = args.includes('--expanded-only');
+const finderOnly = args.includes('--finder-only');
+const selection = finderOnly ? 'finder' : expandedOnly ? 'expanded' : 'full';
 if (process.platform !== 'darwin') throw new Error('Desktop tests require macOS and a logged-in GUI session.');
 const macOS=spawnSync('/usr/bin/sw_vers',['-productVersion'],{encoding:'utf8'}).stdout?.trim();
 assert.ok(Number(macOS?.split('.')[0])>=14,'Desktop tests require macOS 14+ for isolated WebKit stores');
-if (process.argv.slice(2).some(a => !['--no-build','--expanded-only'].includes(a))) throw new Error('Usage: pnpm desktop:test [--no-build] [--expanded-only]');
+if (args.some(arg => !['--no-build', '--expanded-only', '--finder-only'].includes(arg)) || (expandedOnly && finderOnly)) {
+  throw new Error('Usage: pnpm desktop:test [--no-build] [--expanded-only | --finder-only]');
+}
 const root = mkdtempSync(path.join(tmpdir(), 'rbx-desktop-'));
 const library = path.join(root, 'library');
 const destination = path.join(root, 'Desktop USB');
@@ -168,13 +173,16 @@ async function load(title = 'Fixture Track 0',{dual=false}={}) {
   await until(() => app.eval(`document.querySelector('${deck} [data-testid="player-title"]')?.textContent.trim() === ${JSON.stringify(title)} && !!document.querySelector('${dual?'[aria-label="Deck A transport"]':deck} button[aria-label="Play"]:not(:disabled)')`), 'loaded playable fixture');
 }
 async function tab(name) { await app.click('[aria-label="Cue list"] [role="tab"]', { text: name }); }
-async function editable() {
+async function enableFixtureWrites() {
   // Test setup only: incognito storage belongs to this test window. Reload
   // mounts the real preference provider; mutations still use UI controls.
   await app.eval(`(() => { localStorage.setItem('rbl.preferences', JSON.stringify({advanced:{protectLibrary:false},view:{language:'en'}})); return true; })()`);
   await app.eval(`(() => { document.documentElement.dataset.desktopReload = 'waiting'; setTimeout(() => location.reload(), 50); return true; })()`);
   await until(() => app.eval(`!document.documentElement.dataset.desktopReload && !!document.querySelector('[data-testid="browser-title"]')`), 'reload');
   await app.click('[role="treeitem"]', { text: 'All Tracks' });
+}
+async function editable() {
+  await enableFixtureWrites();
   await load();
   await tab('HOT CUE');
   await until(() => app.eval(`!!document.querySelector('${pad('A')}:not(:disabled)')`), 'writable cue controls');
@@ -204,12 +212,16 @@ try {
   } else assert.equal(readFileSync(stamp, 'utf8'), signature(), 'Rebuild with pnpm desktop:test; this binary was not built by the isolated desktop harness');
   binarySha = createHash('sha256').update(readFileSync(path.join(repo, 'target/debug/rbxport'))).digest('hex');
   command(path.join(repo, 'target/debug/examples/e2e_fixture'), [library, library]);
+  assert.ok(Array.isArray(database().playlistEntries),
+    'Rebuild with pnpm desktop:test without --no-build to include playlist memberships in the fixture snapshot');
   await until(async()=>{
     try {const fd=openSync(lockFile,'wx');writeFileSync(fd,String(process.pid));closeSync(fd);ownsLock=true;return true;}
     catch(error){if(error.code!=='EEXIST')throw error;try{const pid=Number(readFileSync(lockFile,'utf8'));if(pid>0)process.kill(pid,0);}catch(e){if(e.code==='ESRCH'){try{unlinkSync(lockFile);}catch{}}}return false;}
   },'exclusive desktop GUI test session',600000);
   await start();
-  if(!expandedOnly) {
+  if (finderOnly) {
+    await enableFixtureWrites();
+  } else if (!expandedOnly) {
   await scenario('fresh install protects cue writes', async () => {
     await load();
     await until(() => app.eval(`document.querySelector('${pad('A')}')?.disabled === true`), 'protected empty pad');
@@ -297,7 +309,7 @@ try {
     assert.deepEqual(snapshot(), []);
   });
   } else await editable();
-  await expanded({scenario,until,root,library,out,command,database,destination,native,verifier,load,start,stop,editable,app:()=>app,pid:()=>child.pid,resultCount:()=>results.length});
+  await expanded({scenario,until,root,library,out,command,database,destination,native,verifier,load,start,stop,editable,finderOnly,app:()=>app,pid:()=>child.pid,resultCount:()=>results.length});
 } catch (error) {
   failure = error.stack;
   console.error(error);
@@ -306,6 +318,6 @@ try {
 } finally {
   await stop();
   if(ownsLock)unlinkSync(lockFile);
-  writeFileSync(path.join(out, 'results.json'), JSON.stringify({ platform: process.platform, macOS, arch: process.arch, host: hostname(), selection:expandedOnly?'expanded':'full', cpu: cpus()[0]?.model, runtime, binarySha, failure, root, status: process.exitCode ? 'failed' : 'passed', results }, null, 2));
+  writeFileSync(path.join(out, 'results.json'), JSON.stringify({ platform: process.platform, macOS, arch: process.arch, host: hostname(), selection, cpu: cpus()[0]?.model, runtime, binarySha, failure, root, status: process.exitCode ? 'failed' : 'passed', results }, null, 2));
   console.log(`Evidence: ${out}\nFixture retained for inspection: ${library}`);
 }

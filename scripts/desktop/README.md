@@ -10,7 +10,13 @@ The release workflow runs this suite during deployment validation, before
 packaging and publication. Pull-request checks and manual validation omit it.
 
 `pnpm desktop:test --no-build` reuses the exact test binary checked by a SHA-256
-stamp. `--expanded-only` is a development filter; CI always runs the full suite.
+stamp. `--expanded-only` is a development filter. Run
+`pnpm desktop:test --finder-only` on an idle desktop to verify genuine Finder
+audio drops onto an open playlist, a playlist tree row, the open All Tracks
+list, and the All Tracks tree row. This mode checks the file path and playlist
+membership in SQLCipher without running the other desktop scenarios. Run it
+without `--no-build` the first time to build the app and fixture helper. CI runs
+the full suite.
 The main WKWebView is asserted to be **1200 × 800 logical pixels**, with the
 normal app's overlay title bar. Test-only sizing and non-resizability do not
 change the normal app configuration. Native drags put Finder beside the test
@@ -26,7 +32,7 @@ SQLCipher, and save event evidence. No DOM `File` or `DataTransfer` is fabricate
 Finder windows opened by the helper are closed; a reused existing window is
 left open and its previous bounds are restored.
 
-The full suite has 34 scenarios. Coverage includes:
+The full suite has 35 scenarios. Coverage includes:
 
 - Default protection, hot and memory cues, keyboard editing, waveform/list
   refresh, repeated edits, playback, search, and full-process cue persistence.

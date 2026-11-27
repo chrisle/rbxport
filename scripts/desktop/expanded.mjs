@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, writeFileSync, existsSync, readdirSync, realpa
 import path from 'node:path';
 
 export async function expanded(c) {
-  const { scenario, until, root, library, out, command, database, destination, native, load, start, stop, editable } = c;
+  const { scenario, until, root, library, out, command, database, destination, native, load, start, stop, editable, finderOnly } = c;
   const app = () => c.app();
   const tree = '[role="treeitem"]';
   const name = 'Desktop regression playlist';
@@ -69,6 +69,70 @@ export async function expanded(c) {
   writeFileSync(single,wave);
   const canonical = p=>realpathSync(p).normalize('NFC');
   const held = p=>database().tracks.some(t=>t.path && existsSync(t.path) && canonical(t.path)===canonical(p));
+  const allTracksTree = `${tree}[data-kind="allTracks"][data-file-drop-playlist="all"]`;
+  const fileDropList = id => `[data-testid="track-scroll"][data-file-drop-playlist=${JSON.stringify(id)}]`;
+  const finderPreflight = () => scenario('native Finder input permission is available', async () => {
+    const access = JSON.parse(command(native, ['--preflight']));
+    assert.equal(access.accessibility, true);
+    assert.equal(access.postEvents, true);
+  });
+
+  async function verifyFinderImport(file, target, playlist) {
+    await until(() => app().count(target), `writable drop target ${target}`);
+    const before = database();
+    await nativeDrop([file], target);
+    await waitText('footer', playlist ? `Added 1 track to ${playlist.name}.` : 'Imported 1 of 1 files.');
+    const after = database();
+    const imported = after.tracks.filter(track => track.path && existsSync(track.path) && canonical(track.path) === canonical(file));
+    assert.equal(after.tracks.length, before.tracks.length + 1, 'Only one collection track should be added');
+    assert.equal(imported.length, 1, 'Collection must contain the original Finder file path once');
+    const track = imported[0].id;
+    assert.ok(!before.tracks.some(entry => entry.id === track), 'The imported file must have a new track ID');
+    assert.deepEqual(after.playlistEntries.filter(entry => entry.track === track),
+      playlist ? [{ playlist: playlist.id, track }] : [], 'Only the intended playlist may gain the imported track');
+    assert.deepEqual(after.playlistEntries.filter(entry => entry.track !== track), before.playlistEntries,
+      'Existing playlist memberships must be unchanged');
+  }
+
+  const dropOnAllTracksTree = () => scenario('Finder drops audio on the All Tracks tree row while a playlist is open', async () => {
+    const file = path.join(sources, 'All Tracks tree drop.wav');
+    copyFileSync(single, file);
+    await verifyFinderImport(file, allTracksTree);
+  });
+
+  if (finderOnly) {
+    await finderPreflight();
+    const newPlaylist = 'New playlist';
+    let playlist;
+    await scenario('prepare an empty Finder drop playlist', async () => {
+      await collection();
+      await until(() => app().count(allTracksTree), 'writable All Tracks tree row');
+      await context(`${tree}[data-kind="collection"]`, undefined, 'Create New Playlist');
+      await waitText(tree, newPlaylist);
+      const snapshot = database();
+      playlist = snapshot.playlists.find(entry => entry.name === newPlaylist);
+      assert.ok(playlist, 'The fixture playlist must exist in SQLCipher');
+      assert.ok(!snapshot.playlistEntries.some(entry => entry.playlist === playlist.id), 'The fixture playlist must be empty');
+    });
+    await scenario('Finder drops audio into the open playlist list', async () => {
+      await clickText(tree, newPlaylist);
+      await waitText(title, `${newPlaylist} (0 Tracks)`);
+      await verifyFinderImport(single, fileDropList(playlist.id), playlist);
+    });
+    await scenario('Finder drops audio into the open All Tracks list', async () => {
+      await collection();
+      await verifyFinderImport(multi[0], fileDropList('all'));
+    });
+    await scenario('Finder drops audio on the playlist tree row while All Tracks is open', async () => {
+      await waitText(title, 'All Tracks (');
+      const target = `${tree}[data-kind="playlist"][data-file-drop-playlist=${JSON.stringify(playlist.id)}]`;
+      await verifyFinderImport(multi[1], target, playlist);
+    });
+    await clickText(tree, newPlaylist);
+    await waitText(title, `${newPlaylist} (2 Tracks)`);
+    await dropOnAllTracksTree();
+    return;
+  }
 
   await scenario('desktop viewport is fixed across reloads and restarts',async()=> {
     assert.deepEqual(await state('({width:innerWidth,height:innerHeight})'),{width:1200,height:800});
@@ -107,10 +171,7 @@ export async function expanded(c) {
     await until(()=>state(`document.querySelector(${JSON.stringify(selector)})?.getAttribute('aria-checked')==='true'`),'rating redo');
     await until(()=>database().tracks.find(t=>t.title===track).rating===4,'rating redo reaches SQLCipher');
   });
-  await scenario('native Finder input permission is available',async()=> {
-    const access=JSON.parse(command(native,['--preflight']));
-    assert.equal(access.accessibility,true); assert.equal(access.postEvents,true);
-  });
+  await finderPreflight();
   await scenario('Finder drops a Unicode filename into an open playlist with its real path',async()=> {
     await clickText(tree,name); await waitText(title,'(0 Tracks)');
     await nativeDrop([single],'[data-testid="track-scroll"]');
@@ -158,6 +219,9 @@ export async function expanded(c) {
     await waitText(tree,path.basename(folder));await clickText(tree,path.basename(folder));await waitText(title,'(1 Tracks)');
     assert.ok(held(file));
   });
+  await clickText(tree, name);
+  await waitText(title, name);
+  await dropOnAllTracksTree();
   await scenario('Finder drops audio on All Tracks and adds it to the library',async()=> {
     await collection();
     const before=database().tracks.length;

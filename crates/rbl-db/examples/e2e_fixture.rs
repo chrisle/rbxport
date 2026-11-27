@@ -53,7 +53,13 @@ fn main() {
         let playlists: Vec<serde_json::Value> = query.query_map([], |row| Ok(serde_json::json!({
             "id": row.get::<_, String>(0)?, "name": row.get::<_, String>(1)?,
         }))).expect("read playlists").collect::<Result<_, _>>().expect("decode playlists");
-        println!("{}", serde_json::json!({ "cues": cues, "tracks": tracks, "playlists": playlists }));
+        let mut query = db.connection().prepare(
+            "SELECT PlaylistID, ContentID FROM djmdSongPlaylist WHERE rb_local_deleted = 0 ORDER BY PlaylistID, TrackNo, ID"
+        ).expect("playlist membership query");
+        let playlist_entries: Vec<serde_json::Value> = query.query_map([], |row| Ok(serde_json::json!({
+            "playlist": row.get::<_, String>(0)?, "track": row.get::<_, String>(1)?,
+        }))).expect("read playlist memberships").collect::<Result<_, _>>().expect("decode playlist memberships");
+        println!("{}", serde_json::json!({ "cues": cues, "tracks": tracks, "playlists": playlists, "playlistEntries": playlist_entries }));
         return;
     }
     let (Some(out), Some(seen_as)) = (args.next(), args.next()) else {
