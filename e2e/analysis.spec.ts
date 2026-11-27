@@ -139,21 +139,37 @@ test("Auto Analysis does not ask when it is off or the library is read-only", as
 
 test("Analyze Track uses the focused secondary browser selection", async ({ page }) => {
   await page.goto("/?writable=1");
-  const menu = (item: string) => page.evaluate(
-    id => (window as unknown as { __menu: (id: string) => void }).__menu(id), item,
-  );
+  const menu = (item: string) => page.evaluate(async id => {
+    (window as unknown as { __menu: (id: string) => void }).__menu(id);
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+  }, item);
   const main = page.locator('[data-browser-pane="list"][data-browser-side="main"]');
   const sub = page.locator('[data-browser-pane="list"][data-browser-side="sub"]');
   const rows = (list: typeof main) => list.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  const dialog = page.getByRole("dialog", { name: "Analysis Setting" });
   await rows(main).nth(2).click();
+  // A menu event can arrive after focus has moved, with a selection still
+  // retained in the main list.
+  await main.getByRole("searchbox").click();
+  await menu("analyze-track");
+  await expect(dialog).toHaveCount(0);
+  await page.locator('[data-browser-pane="tree"][data-browser-side="main"]').dispatchEvent("mousedown");
+  await menu("analyze-track");
+  await expect(dialog).toHaveCount(0);
   await menu("sub");
   await rows(sub).nth(4).click();
   await rows(sub).nth(5).click({ modifiers: ["Shift"] });
 
-  const dialog = page.getByRole("dialog", { name: "Analysis Setting" });
   await page.keyboard.press("Shift+ControlOrMeta+A");
   await expect(dialog).toContainText("2 tracks selected");
+  // Simulate a late shell event with otherwise eligible main-list focus,
+  // which cannot replace the selection already captured by the dialog.
+  await main.dispatchEvent("mousedown");
+  await menu("analyze-track");
+  await expect(dialog).toContainText("2 tracks selected");
   await dialog.getByRole("checkbox", { name: "BPM / Grid", exact: true }).uncheck();
+  await menu("analyze-track");
+  await expect(dialog).toContainText("2 tracks selected");
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 
   await expect.poll(() => page.evaluate(() => (

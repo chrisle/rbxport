@@ -2357,7 +2357,8 @@ function AppBody() {
       refuseAnalysis();
       return;
     }
-    setAnalysisSelection({ tracks: tracks.map(({ id, title }) => ({ id, title })), focus: browserFocus() });
+    const selection = { tracks: tracks.map(({ id, title }) => ({ id, title })), focus: browserFocus() };
+    setAnalysisSelection(current => current ?? selection);
   });
   const analyseSelection = useEventCallback(() => analyseTracks(selectedTracks));
   const reportSubSelection = useCallback((tracks: { id: string; title: string }[], source?: ViewSpec["source"]) => {
@@ -2476,6 +2477,7 @@ function AppBody() {
   // means, and whether it is allowed right now, is decided in one place —
   // and the keyboard reaches it the same way on the platforms where the
   // webview keeps the accelerators from the native menu.
+  const analysisDialogOpen = useEventCallback(() => analysisSelection !== null || autoAnalysis !== null);
   const runMenu = useCallback((id: string) => {
     if (id === "undo" || id === "redo") {
       const action = id;
@@ -2531,9 +2533,11 @@ function AppBody() {
     if (outcome.action === "bar-command" && outcome.item) {
       // Track and Playlist items use the same command as their other entry
       // points. Sort Items is owned by App and has no browser-side scope.
-      if (outcome.item.browserSide !== undefined && !menuBarEnabled({ ...menuState, has: hasCommand })[outcome.item.id]) return;
+      const analyze = outcome.item.action === "analyseSelection";
+      if (analyze && analysisDialogOpen()) return;
+      if ((analyze || outcome.item.browserSide !== undefined) && !menuBarEnabled({ ...menuState, has: hasCommand })[outcome.item.id]) return;
       runCommand(outcome.item.action, outcome.item.scope === "global"
-        ? undefined : { scope: outcome.item.browserSide ?? menuBarSide(browserFocus()), ...(outcome.item.target === undefined ? {} : { target: outcome.item.target }) });
+        ? undefined : { scope: outcome.item.browserSide ?? menuBarSide(menuState.focus), ...(outcome.item.target === undefined ? {} : { target: outcome.item.target }) });
       return;
     }
     if (outcome.action === "sub") {
@@ -2561,7 +2565,7 @@ function AppBody() {
   }, [
     readOnly, advancedPrefs.protectLibrary, importFromMenu, importFolderFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
     openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider, openReport,
-    editHistory, runLibraryHistory, showMissingFiles,
+    editHistory, runLibraryHistory, showMissingFiles, analysisDialogOpen,
   ]);
 
   // The Track and Playlist menus' greyed items, worked out from the focus
@@ -2622,8 +2626,7 @@ function AppBody() {
   const keyOverrides = keyMap(prefs.preferences.keyboard);
   /** The level Mute took the master down from, while it is muted. */
   const mutedFrom = useRef<number | null>(null);
-  // The shell's own commands (see `src/lib/commands.ts`): the keys below, the
-  // Track menu's Analyze Track and anything else that asks run these.
+  // The shell's own commands (see `src/lib/commands.ts`), shared with its shortcuts.
   useCommands({
     // A knob reading a step: rekordbox's command + F12 and F11.
     volumeUp: () => {
