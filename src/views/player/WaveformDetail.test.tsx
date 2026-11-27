@@ -165,6 +165,83 @@ describe("PCM read-ahead", () => {
     }, expect.anything());
   });
 
+  it.each(["progress", "completion"] as const)("keeps both decks' PCM buffers during analysis %s", async event => {
+    const deckA = new Uint8Array(8).fill(2);
+    const deckB = new Uint8Array(8).fill(4);
+    const reads = vi.fn((id: string) => Promise.resolve(id === "analysis-pcm-a" ? deckA : deckB));
+    const progress = new Set<(id: string) => void>();
+    let changed = (_id: string) => {};
+    __setBackend({
+      trackPcmWaveform: reads,
+      onAnalysisChanged: (listener: (id: string) => void) => {
+        changed = listener;
+        return () => {};
+      },
+      onAnalysisProgress: (listener: (id: string) => void) => {
+        progress.add(listener);
+        return () => { progress.delete(listener); };
+      },
+    } as unknown as Backend);
+
+    const show = (position: number) => act(() => root.render(<>
+      {["analysis-pcm-a", "analysis-pcm-b"].map(trackId => (
+        <WaveformDetail key={trackId} trackId={trackId} loadIntent={1} progress={position / 10_000}
+          width={400} height={80} detail
+          pcmWindow={{ fromMs: 0, toMs: 6000, drawFromMs: position, drawToMs: position + 1000 }} />
+      ))}
+    </>));
+    const drawnBuffers = () => drawn.pcm.mock.calls.map(call => call[1] as Uint8Array);
+    show(2000);
+    await settle();
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(drawnBuffers().slice(-2)).toEqual([deckA, deckB]);
+    drawn.pcm.mockClear();
+
+    for (const [id, position] of [["analysis-pcm-a", 2050], ["analysis-pcm-b", 2100]] as const) {
+      act(() => {
+        if (event === "progress") progress.forEach(listener => listener(id));
+        else changed(id);
+      });
+      expect(drawnBuffers().map(bytes => bytes.length)).not.toContain(0);
+      show(position);
+      await settle();
+      expect(drawnBuffers().slice(-2)).toEqual([deckA, deckB]);
+    }
+    expect(drawnBuffers().every(bytes => bytes === deckA || bytes === deckB)).toBe(true);
+    expect(reads).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the new PCM request after reloading the same track", async () => {
+    const old = deferred<Uint8Array>();
+    const latest = deferred<Uint8Array>();
+    const reads = vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
+    __setBackend({
+      trackPcmWaveform: reads,
+      onAnalysisChanged: () => () => {},
+      onAnalysisProgress: () => () => {},
+    } as unknown as Backend);
+    const show = (loadIntent: number) => act(() => root.render(
+      <WaveformDetail trackId="reloaded-pcm-track" loadIntent={loadIntent} progress={0.5}
+        width={400} height={80} detail
+        pcmWindow={{ fromMs: 0, toMs: 6000, drawFromMs: 2000, drawToMs: 3000 }} />,
+    ));
+
+    show(1);
+    await settle();
+    show(2);
+    await settle();
+    expect(reads).toHaveBeenCalledTimes(2);
+
+    drawn.pcm.mockClear();
+    old.resolve(new Uint8Array(8).fill(9));
+    await settle();
+    expect(drawn.pcm).not.toHaveBeenCalled();
+    const current = new Uint8Array(8).fill(5);
+    latest.resolve(current);
+    await settle();
+    expect(drawn.pcm.mock.lastCall?.[1]).toBe(current);
+  });
+
   it("ignores a late read after a seek outside its window", async () => {
     const stale = pcm;
     render({ fromMs: 0, toMs: 6000, drawFromMs: 2000, drawToMs: 4000 });

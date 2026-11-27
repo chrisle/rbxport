@@ -31,7 +31,7 @@ interface LoadedTag extends LoadedWaveform {
   palette: WavePalette;
 }
 interface PcmBuffer extends LoadedWaveform {
-  revision: number;
+  loadIntent: number;
   fromMs: number;
   toMs: number;
 }
@@ -135,7 +135,9 @@ export const WaveformDetail = memo(function WaveformDetail({
     return () => { live = false; };
   }, [request]);
 
-  useEffect(() => () => { pendingPcm.current = null; }, [trackId, revision, pcmMode]);
+  // PCM is decoded from the loaded audio file. Analysis updates its tags,
+  // but do not retire a source-audio buffer or its in-flight replacement.
+  useLayoutEffect(() => () => { pendingPcm.current = null; }, [trackId, loadIntent, pcmMode]);
 
   useEffect(() => {
     if (!pcmWindow) return;
@@ -144,17 +146,17 @@ export const WaveformDetail = memo(function WaveformDetail({
     // A render/palette change must never clear a usable PCM envelope.
     const from = Math.max(pcmWindow.fromMs, pcmWindow.drawFromMs - 750);
     const to = Math.min(pcmWindow.toMs, pcmWindow.drawToMs + 750);
-    if (pcmData?.trackId === trackId && pcmData.revision === revision
+    if (pcmData?.trackId === trackId && pcmData.loadIntent === loadIntent
       && pcmData.fromMs <= from && pcmData.toMs >= to) {
       // A seek back into the cached window supersedes its pending successor.
       pendingPcm.current = null;
       return;
     }
     const pending = pendingPcm.current;
-    if (pending?.trackId === trackId && pending.revision === revision
+    if (pending?.trackId === trackId && pending.loadIntent === loadIntent
       && pending.fromMs <= Math.max(pcmWindow.fromMs, pcmWindow.drawFromMs)
       && pending.toMs >= Math.min(pcmWindow.toMs, pcmWindow.drawToMs)) return;
-    const request = { trackId, revision, fromMs: pcmWindow.fromMs, toMs: pcmWindow.toMs };
+    const request = { trackId, loadIntent, fromMs: pcmWindow.fromMs, toMs: pcmWindow.toMs };
     pendingPcm.current = request;
     void getBackend().then(backend => backend.trackPcmWaveform(trackId, request.fromMs, request.toMs, 7_500))
       .then(bytes => {
@@ -166,7 +168,7 @@ export const WaveformDetail = memo(function WaveformDetail({
         // update can retry; stale seeks/track responses cannot replace it.
         if (pendingPcm.current === request) pendingPcm.current = null;
       });
-  }, [trackId, revision, pcmWindow, pcmData]);
+  }, [trackId, loadIntent, pcmWindow, pcmData]);
 
   useEffect(() => {
     let live = true;
@@ -209,7 +211,7 @@ export const WaveformDetail = memo(function WaveformDetail({
     if (!ctx) return;
 
     if (pcmWindow) {
-      const loaded = pcmData?.trackId === trackId && pcmData.revision === revision ? pcmData : null;
+      const loaded = pcmData?.trackId === trackId && pcmData.loadIntent === loadIntent ? pcmData : null;
       const fromMs = loaded?.fromMs ?? pcmWindow.fromMs;
       const toMs = loaded?.toMs ?? pcmWindow.toMs;
       const duration = Math.max(toMs - fromMs, 1);
@@ -249,7 +251,7 @@ export const WaveformDetail = memo(function WaveformDetail({
       bottom: inset.bottom * scale,
     });
     ctx.restore();
-  }, [data, pcmData, trackId, revision, progress, span, durationMs, firstBeatMs, width, height, half, detail, palette, inset.top, inset.bottom, pcmWindow]);
+  }, [data, pcmData, trackId, loadIntent, revision, progress, span, durationMs, firstBeatMs, width, height, half, detail, palette, inset.top, inset.bottom, pcmWindow]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;
 });
