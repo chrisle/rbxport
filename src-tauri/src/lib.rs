@@ -571,6 +571,7 @@ pub fn run() {
             new_library::database_drives,
             new_library::switch_library,
             commands::playlist_tree,
+            commands::playlist_tree_snapshot,
             commands::open_view,
             commands::fetch_rows,
             commands::view_ids_in_range,

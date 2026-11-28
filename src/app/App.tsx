@@ -108,6 +108,12 @@ import { useTooltip } from "@/store/usePreferences";
 import { useTranslation } from "@/i18n";
 import { useNativeMenu } from "@/store/useNativeMenu";
 
+interface PlaylistTree {
+  nodes: readonly TreeNode[];
+  context: string | null;
+  epoch: number;
+}
+
 /** The commands the shell itself registers, and so the keys it runs. */
 const SHELL_COMMANDS: ReadonlySet<Action> = new Set<Action>([
   "volumeUp", "volumeDown", "mute", "focusSearch", "clearSearch",
@@ -202,7 +208,18 @@ function AppBody() {
   // window closed with rather than the default that then jumps.
   const [restored] = useState(loadSession);
 
-  const [tree, setTree] = useState<readonly TreeNode[]>(restored.tree);
+  // Startup/replacement ownership, independent of ordinary edit generations.
+  const libraryReadyEpoch = useRef(0);
+  const [playlistTree, setPlaylistTree] = useState<PlaylistTree>({ nodes: restored.tree, context: null, epoch: -1 });
+  const tree = playlistTree.nodes;
+  const refreshPlaylistTree = useCallback(async (backend: Backend) => {
+    const epoch = libraryReadyEpoch.current;
+    const { nodes, context } = await backend.playlistTreeSnapshot();
+    if (libraryReadyEpoch.current !== epoch) return null;
+    const snapshot = { nodes: withSources(nodes), context, epoch };
+    setPlaylistTree(snapshot);
+    return snapshot;
+  }, []);
   const [treeExpansion, setTreeExpansion] = useState(restored.treeExpansion);
   const [editHistory, setEditHistory] = useState({
     canUndo: false, canRedo: false, undoLabel: null as string | null, redoLabel: null as string | null,
@@ -242,8 +259,6 @@ function AppBody() {
   /** File › Display All Missing Files: the Missing File Manager is open. */
   const { open: missingFilesOpen, show: showMissingFiles, close: closeMissingFiles, ready: missingFilesReady } = useMissingFilesManager(prepareMissingFiles);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
-  // Startup/replacement ownership, independent of ordinary edit generations.
-  const libraryReadyEpoch = useRef(0);
   // Do not write the empty bootstrap selection over the session while the
   // backend is still restoring the node that was open at exit. WebKit gets
   // to the effect before the mock backend answers, which exposed the same
@@ -768,12 +783,13 @@ function AppBody() {
         // must not stop the collection from appearing, and it used to: this
         // was one `Promise.all`, so any of the three failing left the window
         // on "Loading…" with nothing said.
-        const [nodes, info] = await Promise.all([
-          backend.playlistTree(),
+        const epoch = libraryReadyEpoch.current;
+        const [{ nodes, context }, info] = await Promise.all([
+          backend.playlistTreeSnapshot(),
           backend.librarySummary(),
         ]);
         if (cancelled || current !== revision) return true;
-        setTree(withSources(nodes));
+        setPlaylistTree({ nodes: withSources(nodes), context, epoch });
         setSummary(info);
         setLoadError(null);
         setMissingLibrary(null);
@@ -1004,7 +1020,7 @@ function AppBody() {
         setPendingEdits(new Map());
         // The tree can change too — a playlist gained tracks, or one was
         // deleted — so it is re-read rather than assumed still right.
-        void backend.playlistTree().then((nodes) => setTree(withSources(nodes)));
+        void refreshPlaylistTree(backend);
       });
     })();
     return () => {
@@ -1012,7 +1028,7 @@ function AppBody() {
       stop?.();
       stopTagList?.();
     };
-  }, []);
+  }, [refreshPlaylistTree]);
 
   const bounds = useCallback(
     () => ({ ...TREE_BOUNDS, available: bodyRef.current?.clientWidth ?? 0 }),
@@ -1231,7 +1247,7 @@ function AppBody() {
               update({ done: processed, pendingRows: trackIds.length - processed });
             }
           } finally {
-            if (processed > 0) setTree(withSources(await backend.playlistTree()));
+            if (processed > 0) await refreshPlaylistTree(backend);
           }
           const noun = (n: number) => `${n} track${n === 1 ? "" : "s"}`;
           report(processed < trackIds.length
@@ -1242,7 +1258,7 @@ function AppBody() {
         },
       });
     },
-    [tree, report, refuse, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates, noteSkips],
+    [tree, report, refuse, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates, noteSkips, refreshPlaylistTree],
   );
 
   const addDraggedTo = useCallback(
@@ -1299,7 +1315,7 @@ function AppBody() {
           stoppable: paths.length > 1,
           run: async ({ signal, update }) => {
             const { dropFolders } = await import("@/lib/folderDrop");
-            await dropFolders(playlistId, paths, t, report, refuse, setTree, analysisPrefs.auto ? analysis.add : undefined,
+            await dropFolders(playlistId, paths, t, report, refuse, refreshPlaylistTree, analysisPrefs.auto ? analysis.add : undefined,
               { mode: advancedPrefs.folderDropClash, ask: askFolderClash }, signal, (done) => update({ done }));
           },
         });
@@ -1359,7 +1375,7 @@ function AppBody() {
               processed += slice.length;
               update({ done: total + processed, pendingRows: toAdd.length - processed });
             }
-            setTree(await backend.playlistTree());
+            await refreshPlaylistTree(backend);
             const already = existing > 0 ? `; ${existing} already in the library` : "";
             const left = skippedTail(skipped);
             noteSkips(skipped);
@@ -1379,7 +1395,7 @@ function AppBody() {
       });
     },
     [tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis, jobs, t, resolveDuplicates,
-      advancedPrefs.folderDropClash, askFolderClash, noteSkips, requireImportReady],
+      advancedPrefs.folderDropClash, askFolderClash, noteSkips, requireImportReady, refreshPlaylistTree],
   );
 
   const importExplorerFolder = useCallback((node: TreeNode) => {
@@ -1677,22 +1693,21 @@ function AppBody() {
       // could land on the number the backend announces for the next edit,
       // and a generation that does not change is a page that is not
       // refetched — a rating lit for a moment and went out.
-      const nodes = withSources(await backend.playlistTree());
-      setTree(nodes);
+      const snapshot = await refreshPlaylistTree(backend);
       report(said);
-      return nodes;
+      return snapshot;
     },
-    [report],
+    [report, refreshPlaylistTree],
   );
 
   // A write, awaited: true once it is saved and reported, false if refused.
   const writeNow = useCallback(
-    async (run: (backend: Backend) => Promise<string>, saved?: (nodes: readonly TreeNode[]) => void): Promise<boolean> => {
+    async (run: (backend: Backend) => Promise<string>, saved?: (snapshot: PlaylistTree) => void): Promise<boolean> => {
       const backend = await getBackend();
       try {
         const said = await run(backend);
-        const nodes = await afterWrite(said);
-        saved?.(nodes);
+        const snapshot = await afterWrite(said);
+        if (snapshot) saved?.(snapshot);
         return true;
       } catch (e) {
         refuse(e instanceof Error ? e.message : "That could not be saved.");
@@ -1722,22 +1737,26 @@ function AppBody() {
 
   const createPlaylistIn = useCallback(
     (node: TreeNode, onCreated?: (created: TreeNode) => void) => {
+      const { context, epoch } = playlistTree;
+      const changed = t("The library changed. Try this edit again.");
+      if (context === null || epoch !== libraryReadyEpoch.current || !tree.includes(node)) { refuse(changed); return; }
       // Preserve insertion: first inside a folder, directly below a playlist.
       const parent = parentFor(tree, node);
       const index =
         node.kind === "folder" ? 0 : childrenOf(tree, parent).findIndex((n) => n.id === node.id) + 1;
-      const owner = libraryReadyEpoch.current;
       let createdId: string | undefined;
       void writeNow(async (backend) => {
-        const made = await backend.edits.createPlaylistWithResult("New playlist", parent, index);
+        if (epoch !== libraryReadyEpoch.current) throw new Error(changed);
+        const made = await backend.edits.createPlaylistWithResult("New playlist", parent, index, context);
         createdId = made.id;
         return "Created New playlist.";
-      }, (nodes) => {
-        const made = nodes.find((item) => item.id === createdId);
-        if (made && libraryReadyEpoch.current === owner) onCreated?.(made);
+      }, (snapshot) => {
+        if (snapshot.context !== context || epoch !== libraryReadyEpoch.current) return;
+        const made = snapshot.nodes.find((item) => item.id === createdId);
+        if (made) onCreated?.(made);
       });
     },
-    [writeNow, tree],
+    [writeNow, tree, playlistTree, t, refuse],
   );
 
   const createFolderIn = useCallback(
@@ -1898,21 +1917,22 @@ function AppBody() {
     (node: TreeNode) => {
       if (node.kind === "collection") {
         if (readOnly) { explainEditLock(); return; }
+        const { context, epoch } = playlistTree;
+        const changed = t("The library changed. Try this edit again.");
+        if (context === null || epoch !== libraryReadyEpoch.current || !tree.includes(node)) { refuse(changed); return; }
         const roots = childrenOf(tree, TREE_ROOT);
         if (roots.length === 0) return;
-        const owner = libraryReadyEpoch.current;
         const requireOwner = () => {
-          if (libraryReadyEpoch.current !== owner) throw new Error(t("The library changed. Try this edit again."));
+          if (epoch !== libraryReadyEpoch.current) throw new Error(changed);
         };
         const expected = roots.flatMap(root => [...subtreeIds(tree, root)]);
         void (async () => {
           const backend = await getBackend();
           requireOwner();
-          const context = await backend.edits.playlistDeletionContext();
+          if (await backend.edits.playlistDeletionContext() !== context) throw new Error(changed);
           requireOwner();
-          const confirmed = await confirmRemoval(t("Delete all local playlists and folders? Tracks and their files will remain in the Collection."));
-          return { confirmed, context };
-        })().then(({ confirmed, context }) => {
+          return confirmRemoval(t("Delete all local playlists and folders? Tracks and their files will remain in the Collection."));
+        })().then((confirmed) => {
             if (!confirmed) return;
             requireOwner();
             const blocked = headingDeletionRefusal();
@@ -1922,8 +1942,10 @@ function AppBody() {
               const blocked = headingDeletionRefusal();
               if (blocked) throw new Error(blocked);
               const history = await backend.edits.deletePlaylistChildren(roots.map(root => root.id), expected, context);
-              setEditHistory(history);
-              setLibraryEditHistory(history.undoLabel, history.redoLabel);
+              if (epoch === libraryReadyEpoch.current) {
+                setEditHistory(history);
+                setLibraryEditHistory(history.undoLabel, history.redoLabel);
+              }
               return t("Deleted local playlists and folders.");
             });
           }).catch(error => refuse(error instanceof Error ? error.message : "That could not be saved."));
@@ -1937,7 +1959,7 @@ function AppBody() {
         return `Deleted ${node.name}.`;
       });
     },
-    [write, selectedNode, tree, readOnly, explainEditLock, confirmRemoval, t, refuse, headingDeletionRefusal],
+    [write, selectedNode, tree, playlistTree, readOnly, explainEditLock, confirmRemoval, t, refuse, headingDeletionRefusal],
   );
 
   const runLibraryHistory = useCallback(
@@ -2082,7 +2104,7 @@ function AppBody() {
               update({ done: count });
             });
           } finally {
-            if (removed > 0) setTree(withSources(await backend.playlistTree()));
+            if (removed > 0) await refreshPlaylistTree(backend);
           }
           const noun = `${removed} track${removed === 1 ? "" : "s"}`;
           report(removed < ids.length ? `Stopped: removed ${noun} from the collection.` : `Removed ${noun} from the collection.`);
@@ -2090,7 +2112,7 @@ function AppBody() {
       });
       return true;
     },
-    [jobs, report, t],
+    [jobs, report, t, refreshPlaylistTree],
   );
 
   // A missing track's menu [OBS rekordbox 7.2.14, issue #201]. Auto
@@ -2456,7 +2478,7 @@ function AppBody() {
         const already = imported.existing.length > 0 ? `; ${imported.existing.length} already in the library` : "";
         noteSkips(imported.skipped);
         report(`Imported ${imported.imported} of ${total} files${skippedTail(imported.skipped)}${already}.`);
-        setTree(await backend.playlistTree());
+        await refreshPlaylistTree(backend);
         // Auto Analysis in Preferences: what just landed goes straight into
         // the queue, as rekordbox does unless told not to.
         if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
@@ -2464,7 +2486,7 @@ function AppBody() {
         refuse(e instanceof Error ? e.message : "Those files could not be imported.");
       }
     },
-    [report, refuse, analysisPrefs.auto, analysis, noteSkips],
+    [report, refuse, analysisPrefs.auto, analysis, noteSkips, refreshPlaylistTree],
   );
 
   const importFromMenu = useCallback(
@@ -2482,10 +2504,10 @@ function AppBody() {
   const importXmlFromMenu = useCallback(async (source: "rekordbox" | "itunes" = "rekordbox") => {
     const { importCollection } = await import("@/lib/xmlImport");
     await importCollection(source, t, setNote, async (backend, imported) => {
-      setTree(await backend.playlistTree());
+      await refreshPlaylistTree(backend);
       if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
     });
-  }, [t, analysisPrefs.auto, analysis]);
+  }, [t, analysisPrefs.auto, analysis, refreshPlaylistTree]);
 
   const exportXmlFromMenu = useCallback(async () => {
     report("Choosing where to write the XML…");

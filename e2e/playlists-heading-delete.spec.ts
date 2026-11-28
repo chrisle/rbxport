@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const heading = (page: Page) => page.locator('[data-browser-pane="tree"][data-browser-side="main"] [data-kind="collection"]');
 const menu = (page: Page, id: string) => page.evaluate(item => (window as unknown as { __menu: (id: string) => void }).__menu(item), id);
-type Snapshot = { ids: string[]; tracks: number; writes: number; message: string | null };
+type Snapshot = { ids: string[]; tracks: number; writes: number; creates: number; message: string | null };
 const snapshot = (page: Page) => page.evaluate(() => (window as unknown as { headingRead: () => Promise<Snapshot> }).headingRead());
 async function open(page: Page) {
   await page.route("**/src/main.tsx*", async route => {
@@ -13,6 +13,9 @@ async function open(page: Page) {
       let resolveConfirmation;
       let message = null;
       let writes = 0;
+      let creates = 0;
+      const create = backend.edits.createPlaylistWithResult.bind(backend.edits);
+      backend.edits.createPlaylistWithResult = (...args) => { creates++; return create(...args); };
       backend.confirm = text => { message = text; return new Promise(resolve => { resolveConfirmation = resolve; }); };
       const remove = backend.edits.deletePlaylistChildren.bind(backend.edits);
       backend.edits.deletePlaylistChildren = (...args) => { writes++; return remove(...args); };
@@ -24,6 +27,13 @@ async function open(page: Page) {
         window.headingPreparationPending = true;
         return new Promise(resolve => { window.headingReleasePreparation = async () => resolve(await prepare()); });
       };
+      const readOwned = backend.playlistTreeSnapshot.bind(backend);
+      backend.playlistTreeSnapshot = () => {
+        const tree = readOwned();
+        if (!window.headingHoldTree) return tree;
+        window.headingReadingTree = true;
+        return new Promise(resolve => { window.headingReleaseTree = () => resolve(tree); });
+      };
       const ready = backend.onLibraryReady.bind(backend);
       const readyListeners = new Set();
       backend.onLibraryReady = listener => {
@@ -33,10 +43,10 @@ async function open(page: Page) {
       };
       window.headingReady = () => { for (const listener of readyListeners) listener(); };
       window.headingAnswer = answer => resolveConfirmation(answer);
-      window.headingSwap = async () => {
+      window.headingSwap = async (announce = true) => {
         const next = (await backend.databaseDrives()).find(drive => !drive.current);
         await backend.switchLibrary(next.masterDb);
-        window.headingReady();
+        if (announce) window.headingReady();
       };
       window.headingAdd = async nested => {
         const tree = await backend.playlistTree();
@@ -46,7 +56,7 @@ async function open(page: Page) {
       window.headingRead = async () => {
         const tree = await backend.playlistTree();
         const view = await backend.openView({ source: { kind: "collection" }, sort: "title", descending: false, query: "" });
-        return { ids: tree.filter(node => ["playlist", "smartPlaylist", "folder"].includes(node.kind)).map(node => node.id), tracks: view.len, writes, message };
+        return { ids: tree.filter(node => ["playlist", "smartPlaylist", "folder"].includes(node.kind)).map(node => node.id), tracks: view.len, writes, creates, message };
       };
     `;
     await route.fulfill({ response, body: setup + await response.text() });
@@ -109,4 +119,42 @@ test("a same-ID library ready event during preparation cannot show an old deleti
   });
   await expect(page.getByRole("contentinfo")).toContainText("The library changed. Try this edit again.");
   expect(await snapshot(page)).toMatchObject({ ids: before.ids, tracks: before.tracks, writes: 0, message: null });
+});
+
+
+test("old heading and ordinary create stay inactive while ready rows are still loading", async ({ page }) => {
+  await open(page);
+  const before = await snapshot(page);
+  await page.evaluate(async () => {
+    const fixture = window as unknown as { headingHoldTree: boolean; headingSwap: () => Promise<void> };
+    fixture.headingHoldTree = true;
+    await fixture.headingSwap();
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { headingReadingTree: boolean }).headingReadingTree)).toBe(true);
+  await expect(heading(page)).toHaveAttribute("aria-selected", "true");
+  await menu(page, "delete-playlist");
+  await expect(page.getByRole("contentinfo")).toContainText("The library changed. Try this edit again.");
+  await menu(page, "create-playlist");
+  expect(await snapshot(page)).toMatchObject({ ids: before.ids, writes: 0, creates: 0, message: null });
+  await page.evaluate(() => {
+    const fixture = window as unknown as { headingHoldTree: boolean; headingReleaseTree: () => void };
+    fixture.headingHoldTree = false;
+    fixture.headingReleaseTree();
+  });
+  await expect(heading(page)).toHaveAttribute("aria-selected", "false");
+  await heading(page).click();
+  await menu(page, "create-playlist");
+  await expect(page.getByRole("contentinfo")).toContainText("Created New playlist.");
+  expect((await snapshot(page)).creates).toBe(1);
+});
+
+test("a backend swap before readiness notification cannot authorize previously rendered rows", async ({ page }) => {
+  await open(page);
+  const before = await snapshot(page);
+  await page.evaluate(() => (window as unknown as { headingSwap: (announce: boolean) => Promise<void> }).headingSwap(false));
+  await menu(page, "delete-playlist");
+  await expect(page.getByRole("contentinfo")).toContainText("The library changed. Try this edit again.");
+  await menu(page, "create-playlist");
+  await expect(page.getByRole("contentinfo")).toContainText("the selected library has changed");
+  expect(await snapshot(page)).toMatchObject({ ids: before.ids, writes: 0, creates: 1, message: null });
 });

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use tauri::Manager;
 
-use super::{create_playlist, create_playlist_with_result, redo_edit, undo_edit};
+use super::{create_playlist, create_playlist_with_result, playlist_tree_snapshot, redo_edit, undo_edit};
 use crate::state::AppState;
 
 fn fixture() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {
@@ -41,6 +41,7 @@ fn ordinary_create_returns_exact_identity_without_changing_legacy_or_undo() {
         "Same name".into(),
         "root".into(),
         Some(1),
+        state().playlist_deletion_context().unwrap(),
     ))
     .unwrap();
     let next = run(create_playlist_with_result(
@@ -49,6 +50,7 @@ fn ordinary_create_returns_exact_identity_without_changing_legacy_or_undo() {
         "Same name".into(),
         "root".into(),
         Some(2),
+        state().playlist_deletion_context().unwrap(),
     ))
     .unwrap();
     assert!(legacy < made.generation && made.generation < next.generation);
@@ -118,6 +120,7 @@ fn ordinary_create_result_preserves_pending_restore_refusal_and_history() {
         "Refused new".into(),
         "root".into(),
         None,
+        state().playlist_deletion_context().unwrap(),
     ));
     assert!(old.is_err() && new.is_err());
     assert_eq!(old.unwrap_err().message, new.unwrap_err().message);
@@ -128,4 +131,25 @@ fn ordinary_create_result_preserves_pending_restore_refusal_and_history() {
         b"owned unfinished restore"
     );
     assert!(!super::current_history(&state()).can_undo);
+}
+
+#[test]
+fn ordinary_create_refuses_rows_from_a_replaced_library() {
+    let (_old, app) = fixture();
+    let state = || app.state::<Arc<AppState>>();
+    let old = run(playlist_tree_snapshot(state())).unwrap();
+    let new_dir = tempfile::tempdir().unwrap();
+    let location = rbl_db::fixture::build(new_dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+    let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+    let (library, _) = rbl_index::load(&db).unwrap();
+    state().set_library(library, false, db.schema().db_version, 0, location);
+    let new = run(playlist_tree_snapshot(state())).unwrap();
+    assert!(old.nodes.iter().map(|node| &node.id).eq(new.nodes.iter().map(|node| &node.id)));
+    assert_ne!(old.context, new.context);
+
+    let refused = run(create_playlist_with_result(
+        app.handle().clone(), state(), "Old selection".into(), "root".into(), None, old.context.unwrap(),
+    )).unwrap_err();
+    assert!(refused.message.contains("the selected library has changed"));
+    assert_eq!(run(playlist_tree_snapshot(state())).unwrap().nodes.len(), new.nodes.len());
 }

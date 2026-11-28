@@ -17,7 +17,7 @@ use crate::link::LinkStatusDto;
 use crate::dto::{
     cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
     CreatedPlaylistDto, EditHistoryDto, FolderPlaylistDto, ImportReportDto, LibrarySummaryDto, LimiterDto, PhraseDto, RowDto, UnanalysedTrackDto, UnanalysedTracksDto,
-    TreeNodeDto, ViewHandleDto, ViewSpecDto,
+    PlaylistTreeSnapshotDto, TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
     ExportProgressDto, FilterValuesDto, ItunesLibraryDto, MissingExportFileDto, MissingExportPlaylistDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
     XmlImportReportDto,
@@ -102,6 +102,12 @@ pub fn disable_read_only() -> AppResult<()> {
 pub async fn playlist_tree(state: State<'_, Arc<AppState>>) -> AppResult<Vec<TreeNodeDto>> {
     let library = state.library()?;
     blocking("playlist_tree", move || Ok(build_tree(&library))).await
+}
+
+#[tauri::command]
+pub async fn playlist_tree_snapshot(state: State<'_, Arc<AppState>>) -> AppResult<PlaylistTreeSnapshotDto> {
+    let (library, context) = state.playlist_tree_snapshot()?;
+    blocking("playlist_tree_snapshot", move || Ok(PlaylistTreeSnapshotDto { nodes: build_tree(&library), context })).await
 }
 
 fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
@@ -4009,13 +4015,20 @@ pub async fn create_playlist_with_result<R: tauri::Runtime>(
     name: String,
     parent: String,
     index: Option<usize>,
+    context: String,
 ) -> AppResult<CreatedPlaylistDto> {
+    let owner = Arc::clone(&state);
     let created = Arc::new(std::sync::OnceLock::new());
     let result = Arc::clone(&created);
     let history = recorded_edit_with(
         app, state, "create_playlist", Touched::Playlists,
-        move |w| w.create_with_undo(&name, &parent, rbl_db::write::ATTRIBUTE_PLAYLIST, index)
-            .map(|(_, made)| made),
+        move |w| {
+            if !owner.playlist_deletion_context_matches(&context, &w.library().location().master_db) {
+                return Err(rbl_db::DbError::Conflict("the selected library has changed".into()));
+            }
+            w.create_with_undo(&name, &parent, rbl_db::write::ATTRIBUTE_PLAYLIST, index)
+                .map(|(_, made)| made)
+        },
         move |history, made| {
             let _ = result.set(made.id().to_owned());
             history.record(LibraryEdit::CreatePlaylist(made), "Create Playlist");
