@@ -25,7 +25,13 @@ async function open(page: Page) {
         return new Promise(resolve => { window.headingReleasePreparation = async () => resolve(await prepare()); });
       };
       const ready = backend.onLibraryReady.bind(backend);
-      backend.onLibraryReady = listener => { window.headingReady = listener; return ready(listener); };
+      const readyListeners = new Set();
+      backend.onLibraryReady = listener => {
+        readyListeners.add(listener);
+        const stop = ready(listener);
+        return () => { readyListeners.delete(listener); stop(); };
+      };
+      window.headingReady = () => { for (const listener of readyListeners) listener(); };
       window.headingAnswer = answer => resolveConfirmation(answer);
       window.headingSwap = async () => {
         const next = (await backend.databaseDrives()).find(drive => !drive.current);
