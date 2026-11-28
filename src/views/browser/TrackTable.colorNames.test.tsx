@@ -20,12 +20,12 @@ let reportRow: ReturnType<typeof vi.fn>;
 const noop = () => {};
 const columns = resolve({ ...defaultLayout(), order: ["color", ...defaultLayout().order] });
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
-function render(source: ViewSpec["source"]) {
+function render(source: ViewSpec["source"], onRenameColors?: () => void) {
   act(() => root.render(<Localization><PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update: noop, reset: noop }}>
     <TrackTable spec={{ source, sort: "trackNo", descending: false, query: "" }}
       title="Collection" query="" onQueryChange={noop} onSortChange={noop} libraryGeneration={0}
       columns={columns} onColumnMove={noop} onColumnResize={noop} onColumnToggle={noop}
-      onColumnAutoSize={noop} onColumnAutoSizeAll={noop} onEditColor={noop} onSelectedTracks={report} onSelectedRow={reportRow} />
+      onColumnAutoSize={noop} onColumnAutoSizeAll={noop} onEditColor={noop} {...onRenameColors ? { onRenameColors } : {}} onSelectedTracks={report} onSelectedRow={reportRow} />
   </PreferencesProvider></Localization>));
 }
 beforeEach(async () => {
@@ -79,4 +79,39 @@ it("refreshes a selected row when another database returns the same file ID", as
   render({ ...pdb, format: "oneLibrary" }); await settle(); await settle();
   expect(reportRow).toHaveBeenLastCalledWith(row);
   expect(report).toHaveBeenLastCalledWith([expect.objectContaining({ id: row.id })], { ...pdb, format: "oneLibrary" });
+});
+
+it("offers to rename the master library's eight colours, and not a device's", async () => {
+  const onRenameColors = vi.fn();
+  const colorMenu = () => document.querySelector('[role="menu"][aria-label="Color"]');
+  const rightClick = () => act(() => {
+    host.querySelector('[role="row"] [data-col="color"]')!.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+  });
+  render({ kind: "collection" }, onRenameColors); await settle(); await settle();
+  rightClick();
+  const items = [...colorMenu()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  expect(items).toHaveLength(8);
+  expect(items[0]!.textContent).toContain("Play");
+  act(() => { items[0]!.click(); });
+  expect(onRenameColors).toHaveBeenCalledTimes(1);
+  render({ kind: "device", path: "/stick", format: "oneLibrary", playlist: "0" }, onRenameColors); await settle(); await settle();
+  rightClick();
+  expect(colorMenu()).toBeNull();
+});
+
+it("words the rename menu in German around the library's literal names", async () => {
+  const catalog = { ...de, "Rename {name}…": "„{name}“ umbenennen…" };
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve(catalog) })));
+  backend.colorNames = () => Promise.resolve(["Play", "Play", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"]);
+  render({ kind: "collection" }, noop); await settle(); await settle();
+  act(() => {
+    host.querySelector('[role="row"] [data-col="color"]')!.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+  });
+  await settle();
+  const items = [...document.querySelectorAll<HTMLElement>('[role="menu"][aria-label] [role="menuitem"]')];
+  expect(items.map(item => item.textContent).slice(0, 3)).toEqual(["„Play“ umbenennen…", "„Play“ umbenennen…", "„Orange“ umbenennen…"]);
+  expect(items).toHaveLength(8);
+  expect(items.every(item => item.hasAttribute("data-i18n-ignore"))).toBe(true);
 });

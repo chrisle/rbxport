@@ -108,7 +108,7 @@ export function ContextMenu<A extends string>({
           <div key={`sep-${index}`} className={styles.separator} role="separator" />
         ) : (
           <div
-            key={row.label}
+            key={row.literal && row.action !== null ? row.action : row.label}
             className={styles.row}
             // Hover opens it and moving to another entry closes it, which is
             // what a menu does; the click is for a pointer that arrives
@@ -119,6 +119,7 @@ export function ContextMenu<A extends string>({
               type="button"
               role="menuitem"
               className={styles.item}
+              data-i18n-ignore={row.literal || undefined}
               disabled={!enabled(row, context)}
               // Said as well as done: a greyed entry is still read out as one
               // rekordbox has, just one this cannot choose.
@@ -146,12 +147,13 @@ export function ContextMenu<A extends string>({
                     <div key={`sub-${at}`} className={styles.separator} role="separator" />
                   ) : (
                     <button
-                      key={child.label}
+                      key={child.literal && child.action !== null ? child.action : child.label}
                       type="button"
                       role={child.checked === undefined ? "menuitem" : "menuitemradio"}
                       aria-checked={child.checked}
                       className={styles.item}
                       data-checked={child.checked || undefined}
+                      data-i18n-ignore={child.literal || undefined}
                       disabled={!enabled(child, context)}
                       aria-disabled={enabled(child, context) ? undefined : true}
                       onClick={() => {
