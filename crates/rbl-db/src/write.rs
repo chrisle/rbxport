@@ -1670,6 +1670,63 @@ impl Writer {
         Ok((changed, deletion))
     }
 
+    /// Deletes only the confirmed local root children and their confirmed
+    /// descendants, in one transaction and one existing deletion history.
+    /// A new root sibling is left alone; a changed subtree refuses atomically.
+    pub fn delete_playlist_children_with_undo(
+        &mut self, roots: &[String], expected: &[String],
+    ) -> Result<(Changed, PlaylistDeletion)> {
+        if roots.is_empty() && expected.is_empty() {
+            return Ok((Changed { rows: 0, usn: 0 }, PlaylistDeletion::default()));
+        }
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let expected_set: std::collections::HashSet<_> = expected.iter().cloned().collect();
+        let mut actual = std::collections::HashSet::new();
+        let mut root_set = std::collections::HashSet::new();
+        for root in roots {
+            if !root_set.insert(root) || !tx.query_row(
+                "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND ParentID = ?2 AND rb_local_deleted = 0",
+                params![root, ROOT], |_| Ok(()),
+            ).optional()?.is_some() {
+                return Err(DbError::Conflict("the confirmed playlists have changed".into()));
+            }
+            let mut frontier = vec![root.clone()];
+            while let Some(id) = frontier.pop() {
+                if !actual.insert(id.clone()) {
+                    return Err(DbError::Conflict("the confirmed playlists have changed".into()));
+                }
+                let attribute: i64 = tx.query_row(
+                    "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+                    params![id], |row| row.get(0),
+                )?;
+                if !matches!(attribute, 0 | 1 | 4) {
+                    return Err(DbError::WriteRefused("unsupported playlist type in confirmed deletion".into()));
+                }
+                let mut stmt = tx.prepare("SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0")?;
+                frontier.extend(stmt.query_map(params![id], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?);
+            }
+        }
+        if expected_set.len() != expected.len() || actual != expected_set {
+            return Err(DbError::Conflict("the confirmed playlists have changed".into()));
+        }
+        let mut all = PlaylistDeletion::default();
+        let mut changed = Changed { rows: 0, usn: 0 };
+        for root in roots {
+            let (part, deletion) = tombstone_subtree(&tx, root, &stamp)?;
+            changed.rows += part.rows;
+            changed.usn = part.usn;
+            all.playlist_ids.extend(deletion.playlist_ids);
+            all.membership_ids.extend(deletion.membership_ids);
+        }
+        set_counter(&tx, changed.usn)?;
+        tx.commit()?;
+        Ok((changed, all))
+    }
+
     /// Restores exactly the rows made into tombstones by a deletion.
     pub fn restore_playlist(&mut self, deletion: &PlaylistDeletion) -> Result<Changed> {
         self.set_playlist_deletion(deletion, false)

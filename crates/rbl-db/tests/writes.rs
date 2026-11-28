@@ -5959,3 +5959,56 @@ fn shared_master_paths_extra_aliases_exclude_cloud_but_keep_exact_raw_and_normal
     f.writer.relocate_manual_with_undo(&[(old.clone(), second)]).unwrap();
     assert_eq!(f.one::<String>("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&old]), stored);
 }
+
+#[test]
+fn confirmed_heading_deletion_is_one_exact_history_and_preserves_collection() {
+    let mut f = fixture();
+    let before = f.children(ROOT);
+    let folder = f.writer.create_folder("Heading folder", ROOT).unwrap();
+    let nested = f.writer.create_playlist("Nested", &folder).unwrap();
+    let other = f.writer.create_playlist("Heading list", ROOT).unwrap();
+    f.writer.add_tracks(&nested, &[track_id(0), track_id(1)]).unwrap();
+    f.writer.remove_tracks(&nested, &[track_id(1)]).unwrap();
+    let roots = vec![folder.clone(), other.clone()];
+    let expected = vec![folder.clone(), nested.clone(), other.clone()];
+    // A sibling arriving after confirmation is not silently included.
+    let later = f.writer.create_playlist("Later", ROOT).unwrap();
+    let content: String = f.one("SELECT GROUP_CONCAT(ID || ':' || BPM || ':' || FolderPath) FROM djmdContent", &[]);
+    let (_, deletion) = f.writer.delete_playlist_children_with_undo(&roots, &expected).unwrap();
+    assert_eq!(deletion.playlist_ids.len(), 3);
+    assert_eq!(deletion.membership_ids.len(), 1);
+    assert_eq!(f.children(ROOT), [before.clone(), vec![later.clone()]].concat());
+    assert_eq!(f.one::<String>("SELECT GROUP_CONCAT(ID || ':' || BPM || ':' || FolderPath) FROM djmdContent", &[]), content);
+    f.writer.restore_playlist(&deletion).unwrap();
+    assert_eq!(f.order(&nested), [track_id(0)]);
+    assert_eq!(f.children(ROOT), [before.clone(), roots, vec![later.clone()]].concat());
+    f.writer.redo_playlist_deletion(&deletion).unwrap();
+    assert_eq!(f.children(ROOT), [before, vec![later]].concat());
+}
+
+#[test]
+fn confirmed_heading_deletion_refuses_changed_or_unsupported_subtrees_atomically() {
+    let mut f = fixture();
+    let a = f.writer.create_playlist("First", ROOT).unwrap();
+    let b = f.writer.create_folder("Second", ROOT).unwrap();
+    let expected = vec![a.clone(), b.clone()];
+    let child = f.writer.create_playlist("Unconfirmed", &b).unwrap();
+    let before = f.children(ROOT);
+    assert!(f.writer.delete_playlist_children_with_undo(&expected, &expected).is_err());
+    assert_eq!(f.children(ROOT), before);
+    assert_eq!(f.children(&b), [child.clone()]);
+    f.conn().execute("UPDATE djmdPlaylist SET Attribute = 99 WHERE ID = ?1", [&child]).unwrap();
+    assert!(f.writer.delete_playlist_children_with_undo(&expected, &[a, b.clone(), child.clone()]).is_err());
+    assert_eq!(f.children(ROOT), before);
+    assert_eq!(f.children(&b), [child]);
+}
+
+#[test]
+fn empty_heading_deletion_has_no_history() {
+    let mut f = fixture();
+    let before = f.children(ROOT);
+    let (changed, deletion) = f.writer.delete_playlist_children_with_undo(&[], &[]).unwrap();
+    assert_eq!(changed.rows, 0);
+    assert!(deletion.is_empty());
+    assert_eq!(f.children(ROOT), before);
+}

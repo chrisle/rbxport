@@ -256,6 +256,9 @@ struct Inner {
     /// detecting again, which is also what lets a test point the whole shell
     /// at a fixture.
     location: Option<rbl_db::LibraryLocation>,
+    /// Opaque confirmation owner; ordinary same-file index refreshes retain it.
+    playlist_deletion_session: String,
+    playlist_deletion_file: Option<rbl_core::durable::FileIdentity>,
     read_only: bool,
     db_version: Option<i64>,
     load_ms: u64,
@@ -396,6 +399,24 @@ impl AppState {
         let mut reader = self.reader.lock();
         *reader = None;
         work()
+    }
+
+    /// Stable only while the loaded master remains the same file/session.
+    pub(crate) fn playlist_deletion_context(&self) -> AppResult<String> {
+        let inner = self.inner.read();
+        if inner.library.is_none() || inner.playlist_deletion_file.is_none() {
+            return Err(AppError::internal("The library has not finished loading yet."));
+        }
+        Ok(inner.playlist_deletion_session.clone())
+    }
+
+    /// Rechecked inside the edit gate against the writer's actual destination.
+    pub(crate) fn playlist_deletion_context_matches(&self, context: &str, master: &std::path::Path) -> bool {
+        let file = std::fs::File::open(master).ok()
+            .and_then(|file| rbl_core::durable::file_identity(&file).ok());
+        let inner = self.inner.read();
+        inner.playlist_deletion_session == context && file.is_some() && file == inner.playlist_deletion_file
+            && inner.location.as_ref().is_some_and(|location| location.master_db == master)
     }
 
     /// Where the loaded library is.
@@ -576,9 +597,17 @@ impl AppState {
         *self.reader.lock() = None;
         // Keep the overlay and its owner change atomic. Snapshot-bound
         // readers take these locks in the same order, without file IO.
+        // A replacement at the same pathname must not inherit an old prompt.
+        // A valid replacement simply requires confirmation again.
+        let file_identity = std::fs::File::open(&location.master_db).ok()
+            .and_then(|file| rbl_core::durable::file_identity(&file).ok());
         let mut fresh = self.fresh_analysis.lock();
         let mut inner = self.inner.write();
         let same_master = inner.location.as_ref().is_some_and(|old| old.master_db == location.master_db);
+        if !same_master || file_identity.is_none() || inner.playlist_deletion_file != file_identity {
+            inner.playlist_deletion_session = uuid::Uuid::new_v4().to_string();
+        }
+        inner.playlist_deletion_file = file_identity;
         // A same-master analysis that landed after this index read stays;
         // another master can reuse the ID but never its pending association.
         fresh.retain(|track, _| same_master
@@ -1350,6 +1379,33 @@ mod played_tests {
         assert_eq!(state.played_tracks(), [] as [String; 0]);
         assert!(!state.link_played().contains(34));
         assert!(!state.reset_played(), "nothing left to reset");
+    }
+
+    #[test]
+    fn heading_deletion_context_retires_on_swap_or_same_path_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        let one = rbl_db::fixture::build(&dir.path().join("one"), rbl_db::fixture::Shape::default()).unwrap();
+        let two = rbl_db::fixture::build(&dir.path().join("two"), rbl_db::fixture::Shape::default()).unwrap();
+        let load = |location: &rbl_db::LibraryLocation| {
+            let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+            rbl_index::load(&db).unwrap().0
+        };
+        state.set_library(load(&one), false, None, 0, one.clone());
+        let context = state.playlist_deletion_context().unwrap();
+        // An ordinary index reload after a same-file edit retains the prompt.
+        state.set_library(load(&one), false, None, 0, one.clone());
+        assert!(state.playlist_deletion_context_matches(&context, &one.master_db));
+        state.set_library(load(&two), false, None, 0, two.clone());
+        assert!(!state.playlist_deletion_context_matches(&context, &two.master_db));
+        state.set_library(load(&one), false, None, 0, one.clone());
+        assert!(!state.playlist_deletion_context_matches(&context, &one.master_db));
+        let context = state.playlist_deletion_context().unwrap();
+        let replacement = one.master_db.with_extension("replacement");
+        std::fs::copy(&one.master_db, &replacement).unwrap();
+        std::fs::rename(&one.master_db, one.master_db.with_extension("old")).unwrap();
+        std::fs::rename(replacement, &one.master_db).unwrap();
+        assert!(!state.playlist_deletion_context_matches(&context, &one.master_db));
     }
 
     #[test]

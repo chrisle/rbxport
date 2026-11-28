@@ -667,6 +667,8 @@ async function realBackend(): Promise<Backend> {
       movePlaylist: (id, parent, index) => invoke<EditHistoryState>("move_playlist", { id, parent, index }),
       sortItems: (folder, language) => invoke<EditHistoryState>("sort_playlist_items", { folder, language }),
       deletePlaylist: (id) => invoke<EditHistoryState>("delete_playlist", { id }),
+      playlistDeletionContext: () => invoke<string>("playlist_deletion_context"),
+      deletePlaylistChildren: (roots, expected, context) => invoke<EditHistoryState>("delete_playlist_children", { roots, expected, context }),
       undoEdit: () => invoke<EditHistoryState>("undo_edit"),
       redoEdit: () => invoke<EditHistoryState>("redo_edit"),
       addTracksToPlaylist: (playlist, tracks, allowDuplicates, transaction) =>

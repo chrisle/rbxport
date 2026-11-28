@@ -2031,6 +2031,9 @@ export interface Edits {
    */
   sortItems(folder: string, language?: string): Promise<EditHistoryState>;
   deletePlaylist(id: string): Promise<EditHistoryState>;
+  /** Exact confirmed local forest under the Playlists heading. */
+  playlistDeletionContext(): Promise<string>;
+  deletePlaylistChildren(roots: string[], expected: string[], context: string): Promise<EditHistoryState>;
   undoEdit(): Promise<EditHistoryState>;
   redoEdit(): Promise<EditHistoryState>;
   /**

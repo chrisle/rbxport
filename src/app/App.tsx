@@ -82,7 +82,7 @@ import { MyTagPanel } from "@/views/browser/MyTagPanel";
 import { columnContextFor, useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { explorerPath, hasLooseId, importLoose, isLooseId } from "@/lib/explorer";
-import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
+import { childrenOf, containerOf, parentFor, subtreeIds, withSources } from "@/lib/tree";
 import { DETAIL_BARS } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
@@ -1893,8 +1893,42 @@ function AppBody() {
     [tree],
   );
 
+  const headingDeletionRefusal = useEventCallback(() => readOnly ? refusal(advancedPrefs.protectLibrary) : null);
   const deleteNode = useCallback(
     (node: TreeNode) => {
+      if (node.kind === "collection") {
+        if (readOnly) { explainEditLock(); return; }
+        const roots = childrenOf(tree, TREE_ROOT);
+        if (roots.length === 0) return;
+        const owner = libraryReadyEpoch.current;
+        const requireOwner = () => {
+          if (libraryReadyEpoch.current !== owner) throw new Error(t("The library changed. Try this edit again."));
+        };
+        const expected = roots.flatMap(root => [...subtreeIds(tree, root)]);
+        void (async () => {
+          const backend = await getBackend();
+          requireOwner();
+          const context = await backend.edits.playlistDeletionContext();
+          requireOwner();
+          const confirmed = await confirmRemoval(t("Delete all local playlists and folders? Tracks and their files will remain in the Collection."));
+          return { confirmed, context };
+        })().then(({ confirmed, context }) => {
+            if (!confirmed) return;
+            requireOwner();
+            const blocked = headingDeletionRefusal();
+            if (blocked) { refuse(blocked); return; }
+            write(async backend => {
+              requireOwner();
+              const blocked = headingDeletionRefusal();
+              if (blocked) throw new Error(blocked);
+              const history = await backend.edits.deletePlaylistChildren(roots.map(root => root.id), expected, context);
+              setEditHistory(history);
+              setLibraryEditHistory(history.undoLabel, history.redoLabel);
+              return t("Deleted local playlists and folders.");
+            });
+          }).catch(error => refuse(error instanceof Error ? error.message : "That could not be saved."));
+        return;
+      }
       write(async (backend) => {
         const history = await backend.edits.deletePlaylist(node.id);
         setEditHistory(history);
@@ -1903,7 +1937,7 @@ function AppBody() {
         return `Deleted ${node.name}.`;
       });
     },
-    [write, selectedNode],
+    [write, selectedNode, tree, readOnly, explainEditLock, confirmRemoval, t, refuse, headingDeletionRefusal],
   );
 
   const runLibraryHistory = useCallback(

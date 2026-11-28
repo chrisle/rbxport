@@ -175,10 +175,9 @@ export function menuBarEnabled({ focus, lists, trees, has }: MenuBarInput): Reco
   live("create-playlist", create);
   live("create-intelligent-playlist", create);
   live("create-folder", create);
-  // Delete Playlist, 0x5004: a playlist, an intelligent playlist or a
-  // folder. rekordbox also offers it on the Playlists heading; what it does
-  // there is not known, so it is greyed here.
-  live("delete-playlist", kind === "folder" || kind === "playlist" || kind === "smartPlaylist");
+  // The local Playlists heading confirms deletion of its captured children.
+  live("delete-playlist", kind === "folder" || kind === "playlist" || kind === "smartPlaylist" ||
+    (kind === "collection" && tree?.hasChildren === true));
   // Sort Items, 0x500d: the selected folder or Playlists heading with
   // children, as the tree context menu offers it. The shared command owns
   // the search refusal for every entry point.

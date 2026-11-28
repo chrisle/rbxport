@@ -4209,6 +4209,27 @@ pub async fn delete_playlist<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+pub fn playlist_deletion_context(state: State<'_, Arc<AppState>>) -> AppResult<String> {
+    state.playlist_deletion_context()
+}
+
+/// The Playlists heading deletes only the local forest confirmed by the user.
+#[tauri::command]
+pub async fn delete_playlist_children<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>,
+    roots: Vec<String>, expected: Vec<String>, context: String,
+) -> AppResult<EditHistoryDto> {
+    let owner = Arc::clone(&state);
+    recorded_edit(app, state, "delete_playlist_children", Touched::Playlists, "Delete Playlist", move |w| {
+        if !owner.playlist_deletion_context_matches(&context, &w.library().location().master_db) {
+            return Err(rbl_db::DbError::Conflict("the confirmed library has changed".into()));
+        }
+        w.delete_playlist_children_with_undo(&roots, &expected)
+            .map(|(_, edit)| LibraryEdit::DeletePlaylist(edit))
+    }).await
+}
+
+#[tauri::command]
 pub async fn undo_edit<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
