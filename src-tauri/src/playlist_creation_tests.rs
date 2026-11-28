@@ -65,7 +65,8 @@ fn ordinary_create_returns_exact_identity_without_changing_legacy_or_undo() {
     assert_eq!(saved, "Same name");
     let ids = state().read_db(|db| {
         let mut query = db.connection().prepare("SELECT ID FROM djmdPlaylist WHERE ParentID = 'root' AND Name = 'Same name' ORDER BY Seq")?;
-        Ok(query.query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?)
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }).unwrap();
     assert_eq!(ids.len(), 3);
     assert_eq!(ids[1], made.id);
