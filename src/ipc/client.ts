@@ -7,7 +7,7 @@
 import { detectPlatform } from "@/lib/shortcuts";
 import { confirmHandler } from "./confirmHost";
 import type {
-  AnalysisStageDescriptor, AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, ConfirmReplace, Cue, SyncEstimate, DeckEvent, Device, DeviceLibrary,
+  CreatedPlaylist, AnalysisStageDescriptor, AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, ConfirmReplace, Cue, SyncEstimate, DeckEvent, Device, DeviceLibrary,
   JogImageState, DevicePlaylistEditResult, DevicePlaylistImportPlan, DevicePlaylistImportResult, DeviceSettings, DeviceSyncState,
   Diagnostics, Duplicates, LogPage, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, UpdateReady, XmlImportReport,
@@ -659,6 +659,7 @@ async function realBackend(): Promise<Backend> {
     onEditHistory: (listener) => subscribe<EditHistoryState>("edit-history:changed", listener),
     edits: {
       createPlaylist: (name, parent, index) => invoke<number>("create_playlist", { name, parent, index }),
+      createPlaylistWithResult: (name, parent, index) => invoke<CreatedPlaylist>("create_playlist_with_result", { name, parent, index }),
       createSmartPlaylist: (name, parent, rule) => invoke<number>("create_smart_playlist", { name, parent, rule }),
       setSmartRule: (playlist, rule) => invoke<number>("set_smart_rule", { playlist, rule }),
       createFolder: (name, parent) => invoke<number>("create_folder", { name, parent }),

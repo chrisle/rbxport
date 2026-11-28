@@ -687,6 +687,7 @@ pub fn run() {
             usb_import::import_usb,
             device_settings::reference_stick_settings,
             commands::create_playlist,
+            commands::create_playlist_with_result,
             commands::smart_rule,
             commands::create_smart_playlist,
             commands::set_smart_rule,

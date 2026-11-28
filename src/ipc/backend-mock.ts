@@ -1097,14 +1097,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return state.generation;
   };
 
+  const createPlaylistWithResult: Edits["createPlaylistWithResult"] = async (name, parent, index) => {
+    const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
+    const id = `made-${nextId++}`;
+    membership.set(id, []);
+    insertUnder(parent, { id, name, kind: "playlist", depth, childCount: 0 }, index);
+    return { id, generation: await recordCreation(id, parent, "Create Playlist") };
+  };
+
   const edits: Edits = {
-    createPlaylist: (name, parent, index) => {
-      const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
-      const id = `made-${nextId++}`;
-      membership.set(id, []);
-      insertUnder(parent, { id, name, kind: "playlist", depth, childCount: 0 }, index);
-      return recordCreation(id, parent, "Create Playlist");
-    },
+    createPlaylist: async (name, parent, index) => (await createPlaylistWithResult(name, parent, index)).generation,
+    createPlaylistWithResult,
     createFolder: (name, parent) => {
       const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
       const id = `made-${nextId++}`;

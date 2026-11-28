@@ -16,7 +16,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::link::LinkStatusDto;
 use crate::dto::{
     cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
-    EditHistoryDto, FolderPlaylistDto, ImportReportDto, LibrarySummaryDto, LimiterDto, PhraseDto, RowDto, UnanalysedTrackDto, UnanalysedTracksDto,
+    CreatedPlaylistDto, EditHistoryDto, FolderPlaylistDto, ImportReportDto, LibrarySummaryDto, LimiterDto, PhraseDto, RowDto, UnanalysedTrackDto, UnanalysedTracksDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
     ExportProgressDto, FilterValuesDto, ItunesLibraryDto, MissingExportFileDto, MissingExportPlaylistDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
@@ -3999,6 +3999,36 @@ pub async fn create_playlist<R: tauri::Runtime>(
     .await
     .map(|history| history.generation)
 }
+
+/// Ordinary create with the writer's exact row identity. The original
+/// `create_playlist` command remains generation-only for existing callers.
+#[tauri::command]
+pub async fn create_playlist_with_result<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    parent: String,
+    index: Option<usize>,
+) -> AppResult<CreatedPlaylistDto> {
+    let created = Arc::new(std::sync::OnceLock::new());
+    let result = Arc::clone(&created);
+    let history = recorded_edit_with(
+        app, state, "create_playlist", Touched::Playlists,
+        move |w| w.create_with_undo(&name, &parent, rbl_db::write::ATTRIBUTE_PLAYLIST, index)
+            .map(|(_, made)| made),
+        move |history, made| {
+            let _ = result.set(made.id().to_owned());
+            history.record(LibraryEdit::CreatePlaylist(made), "Create Playlist");
+        },
+    ).await?;
+    let id = created.get().cloned()
+        .ok_or_else(|| AppError::new(ErrorKind::Internal, "The created playlist identity was not returned."))?;
+    Ok(CreatedPlaylistDto { id, generation: history.generation })
+}
+
+#[cfg(test)]
+#[path = "playlist_creation_tests.rs"]
+mod playlist_creation_tests;
 
 /// An intelligent playlist's rule, for the editor. Refused when the rule
 /// nests groups, which the editor cannot show without losing them.

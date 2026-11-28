@@ -8,7 +8,7 @@
 import { SearchField } from "@/components/SearchField";
 import { TREE_SEARCH_OPTIONS } from "@/lib/search";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TREE_ROOT, type TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
 import { DeviceIcon, EjectIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon, SmartListIcon } from "@/components/icons";
@@ -396,7 +396,7 @@ export interface TreeViewProps {
   /** Import an Explorer folder as a named playlist under Playlists. */
   onImportFolderPlaylist?: (node: TreeNode) => void;
   /** Create, delete and rename, which the shell owns because they write. */
-  onCreatePlaylist?: (parent: TreeNode) => void;
+  onCreatePlaylist?: (parent: TreeNode, onCreated?: (created: TreeNode) => void) => void;
   onCreateFolder?: (parent: TreeNode) => void;
   onDeleteNode?: (node: TreeNode) => void;
   onRenameNode?: (node: TreeNode, name: string) => void;
@@ -500,6 +500,29 @@ export const TreeView = memo(function TreeView({
   // node: the native menu's items run these, and the tree menu runs the same
   // handlers on the node it was opened on.
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedId) ?? null, [nodes, selectedId]);
+  // Selection belongs to this pane's request. Later input/navigation or a
+  // closed/reopened sub-browser must not be displaced by a delayed create.
+  const [creationOwner] = useState(() => ({ live: false, version: 0 }));
+  useLayoutEffect(() => {
+    creationOwner.live = true;
+    const retire = () => { creationOwner.version++; };
+    window.addEventListener("mousedown", retire, true);
+    window.addEventListener("keydown", retire, true);
+    return () => {
+      creationOwner.live = false;
+      creationOwner.version++;
+      window.removeEventListener("mousedown", retire, true);
+      window.removeEventListener("keydown", retire, true);
+    };
+  }, [creationOwner]);
+  useLayoutEffect(() => { creationOwner.version++; }, [creationOwner, selectedId, query, scope]);
+  const createPlaylist = (node: TreeNode) => {
+    if (!onCreatePlaylist) return;
+    const version = ++creationOwner.version;
+    onCreatePlaylist(node, (made) => {
+      if (creationOwner.live && creationOwner.version === version) onSelect(made);
+    });
+  };
   const onSelected = (run: ((node: TreeNode) => void) | undefined) => () => {
     if (!run || selectedNode === null) return false;
     run(selectedNode);
@@ -525,7 +548,7 @@ export const TreeView = memo(function TreeView({
       onDeviceImport(node);
       return true;
     },
-    createPlaylist: onSelected(onCreatePlaylist),
+    createPlaylist: onSelected(onCreatePlaylist && createPlaylist),
     createIntelligentPlaylist: onSelected(onCreateSmartPlaylist),
     createFolder: onSelected(onCreateFolder),
     deletePlaylist: onSelected(onDeleteNode),
@@ -834,7 +857,7 @@ export const TreeView = memo(function TreeView({
                 if (!readOnly && menu.node.kind === "directory") onImportFolderPlaylist?.(menu.node);
                 break;
               case "createPlaylist":
-                onCreatePlaylist?.(menu.node);
+                createPlaylist(menu.node);
                 break;
               case "createFolder":
                 onCreateFolder?.(menu.node);

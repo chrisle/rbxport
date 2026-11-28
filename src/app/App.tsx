@@ -242,6 +242,8 @@ function AppBody() {
   /** File › Display All Missing Files: the Missing File Manager is open. */
   const { open: missingFilesOpen, show: showMissingFiles, close: closeMissingFiles, ready: missingFilesReady } = useMissingFilesManager(prepareMissingFiles);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
+  // Startup/replacement ownership, independent of ordinary edit generations.
+  const libraryReadyEpoch = useRef(0);
   // Do not write the empty bootstrap selection over the session while the
   // backend is still restoring the node that was open at exit. WebKit gets
   // to the effect before the mock backend answers, which exposed the same
@@ -805,11 +807,13 @@ function AppBody() {
       // and that gap is exactly where the window used to get stuck.
       stopReady = backend.onLibraryReady(() => {
         revision += 1;
+        libraryReadyEpoch.current++;
         void attempt(backend);
       });
       const applyProblem = (problem: LibraryProblem | null) => {
         if (cancelled || problem === null) return;
         revision += 1;
+        libraryReadyEpoch.current++;
         if (problem.kind === "failed") {
           // A library that is there and would not open is reported, not asked about.
           setMissingLibrary(null);
@@ -1673,19 +1677,22 @@ function AppBody() {
       // could land on the number the backend announces for the next edit,
       // and a generation that does not change is a page that is not
       // refetched — a rating lit for a moment and went out.
-      setTree(withSources(await backend.playlistTree()));
+      const nodes = withSources(await backend.playlistTree());
+      setTree(nodes);
       report(said);
+      return nodes;
     },
     [report],
   );
 
   // A write, awaited: true once it is saved and reported, false if refused.
   const writeNow = useCallback(
-    async (run: (backend: Backend) => Promise<string>): Promise<boolean> => {
+    async (run: (backend: Backend) => Promise<string>, saved?: (nodes: readonly TreeNode[]) => void): Promise<boolean> => {
       const backend = await getBackend();
       try {
         const said = await run(backend);
-        await afterWrite(said);
+        const nodes = await afterWrite(said);
+        saved?.(nodes);
         return true;
       } catch (e) {
         refuse(e instanceof Error ? e.message : "That could not be saved.");
@@ -1714,18 +1721,23 @@ function AppBody() {
   }, [t]);
 
   const createPlaylistIn = useCallback(
-    (node: TreeNode) => {
-      // rekordbox's own default name, from german.lang. It goes where the menu
-      // was opened: first inside a folder, directly below a playlist.
+    (node: TreeNode, onCreated?: (created: TreeNode) => void) => {
+      // Preserve insertion: first inside a folder, directly below a playlist.
       const parent = parentFor(tree, node);
       const index =
         node.kind === "folder" ? 0 : childrenOf(tree, parent).findIndex((n) => n.id === node.id) + 1;
-      write(async (backend) => {
-        await backend.edits.createPlaylist("New playlist", parent, index);
+      const owner = libraryReadyEpoch.current;
+      let createdId: string | undefined;
+      void writeNow(async (backend) => {
+        const made = await backend.edits.createPlaylistWithResult("New playlist", parent, index);
+        createdId = made.id;
         return "Created New playlist.";
+      }, (nodes) => {
+        const made = nodes.find((item) => item.id === createdId);
+        if (made && libraryReadyEpoch.current === owner) onCreated?.(made);
       });
     },
-    [write, tree],
+    [writeNow, tree],
   );
 
   const createFolderIn = useCallback(

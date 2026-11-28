@@ -91,6 +91,14 @@ pub struct EditHistoryDto {
     pub redo_label: Option<String>,
 }
 
+/// Exact row identity from an ordinary playlist creation.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedPlaylistDto {
+    pub id: String,
+    pub generation: u32,
+}
+
 /// One output the audio could go to.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
