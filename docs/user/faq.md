@@ -31,6 +31,12 @@ or its agent is running, so quit rekordbox before editing in RBXport, then
 quit RBXport before reopening rekordbox. Restoring a backup and syncing a USB
 stick also need rekordbox closed; creating a backup does not.
 
+Hot cue and beat grid edits on collection tracks save directly to the library.
+To see those edits in rekordbox, open that same library. If the library is on
+an external drive, keep it mounted while using either app. To copy playlists
+to a USB device, use **SYNC** in Sync Manager.
+[USB export guide](usb-export.md#what-a-selection-exports)
+
 To use a different library in both apps, switch it in RBXport under
 Preferences → Advanced → Database → Database management, or in rekordbox under
 Preferences → Advanced. Either one sets the location the other reads. See
