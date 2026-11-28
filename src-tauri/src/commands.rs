@@ -4222,7 +4222,7 @@ pub async fn delete_playlist<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-pub fn playlist_deletion_context(state: State<'_, Arc<AppState>>) -> AppResult<String> {
+pub async fn playlist_deletion_context(state: State<'_, Arc<AppState>>) -> AppResult<String> {
     state.playlist_deletion_context()
 }
 
