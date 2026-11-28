@@ -1209,6 +1209,34 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const afterTree = treeSnapshot();
       return recordEdit({ label: "Sort Items", undo: () => restoreTree(before), redo: () => restoreTree(afterTree) });
     },
+    playlistDeletionContext: () => Promise.resolve(databaseDrives.find(drive => drive.current)?.masterDb ?? ""),
+    deletePlaylistChildren: async (roots, expected, context) => {
+      if (context !== databaseDrives.find(drive => drive.current)?.masterDb) throw new Error("the confirmed library has changed");
+      if (roots.length === 0 && expected.length === 0) return historyState();
+      const spans = roots.map(id => {
+        const at = tree.findIndex(node => node.id === id);
+        if (at < 0 || tree[at]?.depth !== 1) throw new Error("the confirmed playlists have changed");
+        return tree.slice(at, at + subtreeLength(at));
+      });
+      const actual = spans.flat();
+      if (new Set(expected).size !== expected.length || actual.length !== expected.length ||
+          actual.some(node => !expected.includes(node.id) || !["folder", "playlist", "smartPlaylist"].includes(node.kind))) {
+        throw new Error("the confirmed playlists have changed");
+      }
+      const beforeTree = treeSnapshot();
+      const beforeMembership = membershipSnapshot();
+      const doomed = new Set(expected);
+      for (let at = tree.length - 1; at >= 0; at -= 1) {
+        const node = tree[at];
+        if (node && doomed.has(node.id)) { tree.splice(at, 1); membership.delete(node.id); }
+      }
+      const afterTree = treeSnapshot();
+      const afterMembership = membershipSnapshot();
+      return recordEdit({ label: "Delete Playlist",
+        undo: () => { restoreTree(beforeTree); restoreMembership(beforeMembership); },
+        redo: () => { restoreTree(afterTree); restoreMembership(afterMembership); },
+      });
+    },
     deletePlaylist: async (id) => {
       const beforeTree = treeSnapshot();
       const beforeMembership = membershipSnapshot();

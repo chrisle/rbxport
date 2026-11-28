@@ -159,11 +159,11 @@ describe("menuBarEnabled", () => {
 
   it("offers Sort Items on the Playlists heading", () => {
     // rekordbox-playlist-menu-playlists-root.png also has Delete Playlist and
-    // Export live there; not known what they do, so greyed here.
+    // Export live there; its root behavior remains outside this change.
     // rekordbox-playlist-menu-collection-list-focused.png: Create x3; the
     // Playlists heading's Sort Items command also has a selected root.
     const create = ["create-folder", "create-intelligent-playlist", "create-playlist"];
-    expect(enabled(TREE, null, "collection")).toEqual([...create, "sort-items"]);
+    expect(enabled(TREE, null, "collection")).toEqual([...create, "delete-playlist", "sort-items"]);
     expect(enabled(LIST, { selected: 1, rows: [{}] }, "allTracks").filter((id) => id.startsWith("create"))).toEqual(create);
   });
 

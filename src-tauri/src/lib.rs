@@ -696,6 +696,8 @@ pub fn run() {
             commands::move_playlist,
             commands::sort_playlist_items,
             commands::delete_playlist,
+            commands::delete_playlist_children,
+            commands::playlist_deletion_context,
             commands::undo_edit,
             commands::redo_edit,
             commands::add_tracks_to_playlist,
