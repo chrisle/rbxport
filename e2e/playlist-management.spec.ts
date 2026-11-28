@@ -110,6 +110,8 @@ test("a track dropped on a new playlist is in it, and its menu takes it out agai
   const made = item(page, "New playlist");
   await expect(made).toBeVisible();
 
+  // Creation selects the new empty playlist. Return to All Tracks for the drop.
+  await collection(page).click();
   // From All Tracks, the second row, so the title is known before the drop.
   const source = rows(page).nth(1);
   const title = (await source.locator('[data-col="title"]').innerText()).trim();
@@ -147,6 +149,7 @@ test("a repeated input ID reports the one membership actually added", async ({ p
   const made = item(page, "New playlist");
   await expect(made).toBeVisible();
 
+  await collection(page).click();
   // The ordinary selection is a Set, so the browser cannot produce repeated
   // IDs by clicking rows. Inject them at its drag handoff to exercise the UI's
   // count from the backend result rather than from attempted input IDs.
@@ -196,6 +199,7 @@ test("a playlist folder shows its child tracks instead of the collection", async
   const title = (await source.locator('[data-col="title"]').innerText()).trim();
   const current = item(page, "CURRENT");
   await chooseFromTreeMenu(page, current, "Create New Playlist");
+  await collection(page).click();
   await source.dragTo(item(page, "New playlist"));
   await current.click();
   await expect(page.getByTestId("browser-title")).toContainText("CURRENT (");
@@ -209,6 +213,7 @@ test("dragging a selection drops every row in it, not just the one under the han
   const made = item(page, "New playlist");
   await expect(made).toBeVisible();
 
+  await collection(page).click();
   // Three rows, shift-click; the press that starts the drag lands on a row
   // already selected, and must not collapse the selection to it.
   await rows(page).nth(1).locator('[data-col="title"]').click();
@@ -262,7 +267,8 @@ test("deleting a playlist takes it out of the tree and the view moves off it", a
   await open(page);
   await chooseFromTreeMenu(page, item(page, "Melodic Vox"), "Create New Playlist");
   const made = item(page, "New playlist");
-  await made.click();
+  // Creation already selected the row. Clicking it again would start renaming.
+  await expect(made).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("browser-title")).toHaveText("New playlist (0 Tracks)");
 
   await chooseFromTreeMenu(page, made, "Delete Playlist");

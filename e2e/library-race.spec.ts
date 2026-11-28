@@ -168,14 +168,14 @@ async function holdStartupProblem(page: Page, holdReady = false) {
       import { getBackend as startupBackend } from "/src/ipc/client.ts";
       const backend = await startupBackend();
       const subscribeProblem = backend.onLibraryProblem;
-      const readTree = backend.playlistTree;
+      const readTree = backend.playlistTreeSnapshot;
       const create = backend.createLibrary;
       let creating = false;
       backend.createLibrary = () => { creating = true; return create(); };
-      backend.playlistTree = () => {
+      backend.playlistTreeSnapshot = () => {
         const result = readTree();
         if (!creating || !${holdReady}) return result;
-        return result.then(rows => new Promise(resolve => { window.__releaseReadyTree = () => resolve(rows); }));
+        return result.then(snapshot => new Promise(resolve => { window.__releaseReadyTree = () => resolve(snapshot); }));
       };
       let reportProblem;
       backend.onLibraryProblem = listener => {

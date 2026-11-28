@@ -23,6 +23,7 @@ test("native Add To Playlist uses the track selection and the chosen live destin
   await page.getByRole("treeitem").filter({ hasText: "Hardstyle" }).first().click({ button: "right" });
   await page.getByRole("menu", { name: "Playlist", exact: true }).getByRole("menuitem", { name: "Create New Playlist", exact: true }).click();
   await expect(status(page)).toContainText("Created New playlist.");
+  await page.locator('[role="treeitem"][data-kind="collection"]').click();
   const row = rows(page).nth(1);
   const title = (await row.locator('[data-col="title"]').innerText()).trim();
   await row.click();
