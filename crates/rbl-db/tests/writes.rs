@@ -5996,7 +5996,7 @@ fn confirmed_heading_deletion_refuses_changed_or_unsupported_subtrees_atomically
     let before = f.children(ROOT);
     assert!(f.writer.delete_playlist_children_with_undo(&expected, &expected).is_err());
     assert_eq!(f.children(ROOT), before);
-    assert_eq!(f.children(&b), [child.clone()]);
+    assert_eq!(f.children(&b).as_slice(), std::slice::from_ref(&child));
     f.conn().execute("UPDATE djmdPlaylist SET Attribute = 99 WHERE ID = ?1", [&child]).unwrap();
     assert!(f.writer.delete_playlist_children_with_undo(&expected, &[a, b.clone(), child.clone()]).is_err());
     assert_eq!(f.children(ROOT), before);
