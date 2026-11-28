@@ -1999,9 +1999,16 @@ export interface EditHistoryState {
   redoLabel: string | null;
 }
 
+export interface CreatedPlaylist {
+  id: string;
+  generation: number;
+}
+
 export interface Edits {
   /** `index` is the place among `parent`'s children; omitted, it goes last. */
   createPlaylist(name: string, parent: string, index?: number): Promise<number>;
+  /** Same ordinary create, with the exact saved row for pane-local selection. */
+  createPlaylistWithResult(name: string, parent: string, index?: number): Promise<CreatedPlaylist>;
   /** Create New Intelligent Playlist: a rule under `parent`. */
   createSmartPlaylist(name: string, parent: string, rule: SmartRule): Promise<number>;
   /** Replaces an intelligent playlist's rule. */

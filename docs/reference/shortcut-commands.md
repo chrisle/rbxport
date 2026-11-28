@@ -189,3 +189,10 @@ change the button's grid transformation or reuse TAP/Shift Beatgrid to center.
   at least one treated as present, and a registered analysis command.
 
 Show in Finder (`showInFinder`): rbxport defaults to Command+R on macOS and Ctrl+R on Windows. Select one track in the active browser or playlist to reveal and highlight its audio file in the system file manager. Change or remove the shortcut in Preferences › Keyboard › Track. Missing files and multiple selections are not revealed; typing in a field does not trigger it. This default is an rbxport choice. Performance presets retain their own mappings: Performance 1 leaves reveal unbound so Command/Ctrl+R still runs Jump Reverse; Performance 2 binds reveal to Command/Ctrl+R.
+
+Ordinary Create New Playlist selects the saved row in the tree that initiated
+the command, after that row has been refreshed. The result carries its exact
+database ID, so another same-name creation cannot receive the selection.
+Later navigation, input, library replacement or closing the secondary browser
+retires that pending selection. Creation does not force keyboard focus or
+start renaming. Existing generation-only creation callers remain supported.
