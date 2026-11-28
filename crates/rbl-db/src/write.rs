@@ -1687,10 +1687,10 @@ impl Writer {
         let mut actual = std::collections::HashSet::new();
         let mut root_set = std::collections::HashSet::new();
         for root in roots {
-            if !root_set.insert(root) || !tx.query_row(
+            if !root_set.insert(root) || tx.query_row(
                 "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND ParentID = ?2 AND rb_local_deleted = 0",
                 params![root, ROOT], |_| Ok(()),
-            ).optional()?.is_some() {
+            ).optional()?.is_none() {
                 return Err(DbError::Conflict("the confirmed playlists have changed".into()));
             }
             let mut frontier = vec![root.clone()];
