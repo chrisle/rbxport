@@ -285,6 +285,8 @@ export interface Backend {
   disableReadOnly(): Promise<void>;
   rememberScreenAssets(ids: string[], waveformKind: WaveformKind): Promise<void>;
   playlistTree(): Promise<TreeNode[]>;
+  /** Playlist rows bound to their loaded master, for selection-owned edits. */
+  playlistTreeSnapshot(): Promise<{ nodes: TreeNode[]; context: string | null }>;
   openView(spec: ViewSpec): Promise<ViewHandle>;
   fetchRows(viewId: number, offset: number, len: number, extraColumns?: readonly string[]): Promise<RowDto[]>;
   /** Ids between two row indices inclusive; used for shift-click across unfetched rows. */
@@ -2008,7 +2010,7 @@ export interface Edits {
   /** `index` is the place among `parent`'s children; omitted, it goes last. */
   createPlaylist(name: string, parent: string, index?: number): Promise<number>;
   /** Same ordinary create, with the exact saved row for pane-local selection. */
-  createPlaylistWithResult(name: string, parent: string, index?: number): Promise<CreatedPlaylist>;
+  createPlaylistWithResult(name: string, parent: string, index: number | undefined, context: string): Promise<CreatedPlaylist>;
   /** Create New Intelligent Playlist: a rule under `parent`. */
   createSmartPlaylist(name: string, parent: string, rule: SmartRule): Promise<number>;
   /** Replaces an intelligent playlist's rule. */

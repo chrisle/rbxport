@@ -80,6 +80,13 @@ pub struct TreeNodeDto {
     pub child_count: Option<u32>,
 }
 
+/// Playlist rows and the opaque session of their loaded master.
+#[derive(Debug, Serialize)]
+pub struct PlaylistTreeSnapshotDto {
+    pub nodes: Vec<TreeNodeDto>,
+    pub context: Option<String>,
+}
+
 /// Library edit history after a reversible edit, undo, or redo.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

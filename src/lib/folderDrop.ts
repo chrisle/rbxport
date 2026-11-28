@@ -1,5 +1,5 @@
 import { getBackend } from "@/ipc/client";
-import { TREE_ROOT, type Backend, type TreeNode } from "@/ipc/types";
+import { TREE_ROOT, type Backend } from "@/ipc/types";
 import type { FolderDropClash } from "@/lib/preferences";
 
 type Translate = (text: string, values?: Readonly<Record<string, string | number>>) => string;
@@ -154,7 +154,7 @@ export async function dropFolders(
   t: Translate,
   report: (message: string) => void,
   refuse: (message: string) => void,
-  setTree: (tree: TreeNode[]) => void,
+  refreshTree: (backend: Backend) => Promise<unknown>,
   /** Queues the new tracks for analysis; absent while Auto Analysis is off. */
   analyse: ((tracks: { id: string; title: string }[]) => void) | undefined,
   clash: FolderClashPolicy,
@@ -171,6 +171,6 @@ export async function dropFolders(
     refuse(e instanceof Error ? e.message : "Those folders could not be imported.");
   } finally {
     // After a folder that failed too: the folders before it are playlists.
-    setTree(await backend.playlistTree());
+    await refreshTree(backend);
   }
 }

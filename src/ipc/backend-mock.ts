@@ -874,6 +874,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       ? [{ name: "DJ SSD", masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db", current: false }]
       : []),
   ];
+  let playlistContext = "mock-master-0";
+  let playlistSession = 0;
   let problem: LibraryProblem | null = readFlagFromUrl("libraryunavailable")
     ? { kind: "unavailable", masterDb: "/Volumes/DJ SSD/PIONEER/Master/master.db", defaultMasterDb }
     : readFlagFromUrl("nolibrary")
@@ -1097,7 +1099,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return state.generation;
   };
 
-  const createPlaylistWithResult: Edits["createPlaylistWithResult"] = async (name, parent, index) => {
+  const createPlaylist = async (name: string, parent: string, index?: number) => {
     const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
     const id = `made-${nextId++}`;
     membership.set(id, []);
@@ -1106,8 +1108,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   };
 
   const edits: Edits = {
-    createPlaylist: async (name, parent, index) => (await createPlaylistWithResult(name, parent, index)).generation,
-    createPlaylistWithResult,
+    createPlaylist: async (name, parent, index) => (await createPlaylist(name, parent, index)).generation,
+    createPlaylistWithResult: async (name, parent, index, context) => {
+      if (context !== playlistContext) throw new Error("the selected library has changed");
+      return createPlaylist(name, parent, index);
+    },
     createFolder: (name, parent) => {
       const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
       const id = `made-${nextId++}`;
@@ -1209,9 +1214,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const afterTree = treeSnapshot();
       return recordEdit({ label: "Sort Items", undo: () => restoreTree(before), redo: () => restoreTree(afterTree) });
     },
-    playlistDeletionContext: () => Promise.resolve(databaseDrives.find(drive => drive.current)?.masterDb ?? ""),
+    playlistDeletionContext: () => ready ? Promise.resolve(playlistContext) : notReady(),
     deletePlaylistChildren: async (roots, expected, context) => {
-      if (context !== databaseDrives.find(drive => drive.current)?.masterDb) throw new Error("the confirmed library has changed");
+      if (context !== playlistContext) throw new Error("the confirmed library has changed");
       if (roots.length === 0 && expected.length === 0) return historyState();
       const spans = roots.map(id => {
         const at = tree.findIndex(node => node.id === id);
@@ -2201,6 +2206,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // caller mutate the backend's own state, and makes a list captured before
     // an edit appear to have changed by itself.
     playlistTree: () => (ready ? wait(tree.map((node) => ({ ...node }))) : notReady()),
+    playlistTreeSnapshot: () => (ready ? wait({ nodes: tree.map((node) => ({ ...node })), context: playlistContext }) : notReady()),
 
     openView: (spec: ViewSpec) => {
       // Every real command goes through `state.library()?`, so none of them
@@ -3131,6 +3137,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         throw new Error(`${masterDb} is not a master.db`);
       }
       // The real app starts again on it; the mock marks it open.
+      if (databaseDrives.find(drive => drive.current)?.masterDb !== masterDb) {
+        playlistContext = `mock-master-${++playlistSession}`;
+      }
       for (const drive of databaseDrives) drive.current = drive.masterDb === masterDb;
     },
 

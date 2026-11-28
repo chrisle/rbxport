@@ -401,6 +401,17 @@ impl AppState {
         work()
     }
 
+    /// Capture the rows' owner with the library, under the same state lock.
+    pub(crate) fn playlist_tree_snapshot(&self) -> AppResult<(Arc<Library>, Option<String>)> {
+        let inner = self.inner.read();
+        let library = inner.library.clone().ok_or_else(|| {
+            AppError::new(ErrorKind::NotFound, "The library has not finished loading yet.")
+        })?;
+        let context = inner.playlist_deletion_file.as_ref()
+            .map(|_| inner.playlist_deletion_session.clone());
+        Ok((library, context))
+    }
+
     /// Stable only while the loaded master remains the same file/session.
     pub(crate) fn playlist_deletion_context(&self) -> AppResult<String> {
         let inner = self.inner.read();

@@ -72,9 +72,9 @@ async function mountLibrary(kind: "allTracks" | "playlist") {
   let ready = false;
   const listeners = new Set<() => void>();
   backend.onLibraryReady = listener => { listeners.add(listener); return () => { listeners.delete(listener); }; };
-  const originalTree = backend.playlistTree.bind(backend);
+  const originalTree = backend.playlistTreeSnapshot.bind(backend);
   const originalSummary = backend.librarySummary.bind(backend);
-  backend.playlistTree = () => ready ? originalTree() : Promise.reject(new Error("The library has not finished loading yet."));
+  backend.playlistTreeSnapshot = () => ready ? originalTree() : Promise.reject(new Error("The library has not finished loading yet."));
   backend.librarySummary = () => ready ? originalSummary() : Promise.reject(new Error("The library has not finished loading yet."));
   backend.libraryProblem = () => Promise.resolve(null);
   const actualSlice = backend.importPathsSlice.bind(backend);

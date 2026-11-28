@@ -189,6 +189,7 @@ async function realBackend(): Promise<Backend> {
     disableReadOnly: () => invoke<void>("disable_read_only"),
     rememberScreenAssets: (ids, waveformKind) => invoke<void>("remember_screen_assets", { ids, waveformKind }),
     playlistTree: () => invoke<TreeNode[]>("playlist_tree"),
+    playlistTreeSnapshot: () => invoke("playlist_tree_snapshot"),
     openView: (spec) => invoke<ViewHandle>("open_view", { spec }),
     fetchRows: (viewId, offset, len, extraColumns) => invoke<RowDto[]>("fetch_rows", { viewId, offset, len, extraColumns }),
     viewIdsInRange: (viewId, from, to) => invoke<string[]>("view_ids_in_range", { viewId, from, to }),
@@ -659,7 +660,7 @@ async function realBackend(): Promise<Backend> {
     onEditHistory: (listener) => subscribe<EditHistoryState>("edit-history:changed", listener),
     edits: {
       createPlaylist: (name, parent, index) => invoke<number>("create_playlist", { name, parent, index }),
-      createPlaylistWithResult: (name, parent, index) => invoke<CreatedPlaylist>("create_playlist_with_result", { name, parent, index }),
+      createPlaylistWithResult: (name, parent, index, context) => invoke<CreatedPlaylist>("create_playlist_with_result", { name, parent, index, context }),
       createSmartPlaylist: (name, parent, rule) => invoke<number>("create_smart_playlist", { name, parent, rule }),
       setSmartRule: (playlist, rule) => invoke<number>("set_smart_rule", { playlist, rule }),
       createFolder: (name, parent) => invoke<number>("create_folder", { name, parent }),
