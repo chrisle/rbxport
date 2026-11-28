@@ -6012,3 +6012,42 @@ fn empty_heading_deletion_has_no_history() {
     assert!(deletion.is_empty());
     assert_eq!(f.children(ROOT), before);
 }
+
+#[test]
+fn confirmed_heading_redo_refuses_new_descendants_and_memberships() {
+    let mut f = fixture();
+    let first = f.writer.create_playlist("First", ROOT).unwrap();
+    let folder = f.writer.create_folder("Second", ROOT).unwrap();
+    let nested = f.writer.create_playlist("Nested", &folder).unwrap();
+    f.writer.add_tracks(&nested, &[track_id(0)]).unwrap();
+    let roots = [first.clone(), folder.clone()];
+    let expected = [first.clone(), folder.clone(), nested.clone()];
+    let (_, deletion) = f.writer.delete_playlist_children_with_undo(&roots, &expected).unwrap();
+    f.writer.restore_playlist(&deletion).unwrap();
+
+    // Another database writer can change the restored tree while this
+    // recorded Redo still exists. Refusing a change in the second root must
+    // also leave the first root live.
+    let sibling = f.writer.create_playlist("Unrelated root sibling", ROOT).unwrap();
+    let child = f.writer.create_playlist("New descendant", &folder).unwrap();
+    let root_before_redo = f.children(ROOT);
+    assert!(matches!(f.writer.redo_playlist_deletion(&deletion), Err(DbError::Conflict(_))));
+    assert_eq!(f.children(ROOT), root_before_redo);
+    assert_eq!(f.children(&folder), [nested.clone(), child.clone()]);
+    f.writer.delete_playlist(&child).unwrap();
+
+    f.writer.add_tracks(&nested, &[track_id(1)]).unwrap();
+    assert!(matches!(f.writer.redo_playlist_deletion(&deletion), Err(DbError::Conflict(_))));
+    assert_eq!(f.children(ROOT), root_before_redo);
+    assert_eq!(f.order(&nested), [track_id(0), track_id(1)]);
+    f.writer.remove_tracks(&nested, &[track_id(1)]).unwrap();
+
+    // With the confirmed rows unchanged, Redo works and leaves the newly
+    // added unrelated root sibling visible.
+    f.writer.redo_playlist_deletion(&deletion).unwrap();
+    let expected_roots = root_before_redo.into_iter()
+        .filter(|id| id != &first && id != &folder)
+        .collect::<Vec<_>>();
+    assert_eq!(f.children(ROOT), expected_roots);
+    assert!(expected_roots.contains(&sibling));
+}

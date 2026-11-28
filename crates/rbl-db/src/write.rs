@@ -468,6 +468,8 @@ pub fn device_import_name(name: &str, siblings: &[String]) -> String {
 pub struct PlaylistDeletion {
     pub playlist_ids: Vec<String>,
     pub membership_ids: Vec<String>,
+    // A heading deletion rechecks this whole forest before Redo.
+    heading_roots: Vec<String>,
 }
 
 /// What replacing a same-named list removed, so the caller can say so.
@@ -1683,37 +1685,8 @@ impl Writer {
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let expected_set: std::collections::HashSet<_> = expected.iter().cloned().collect();
-        let mut actual = std::collections::HashSet::new();
-        let mut root_set = std::collections::HashSet::new();
-        for root in roots {
-            if !root_set.insert(root) || tx.query_row(
-                "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND ParentID = ?2 AND rb_local_deleted = 0",
-                params![root, ROOT], |_| Ok(()),
-            ).optional()?.is_none() {
-                return Err(DbError::Conflict("the confirmed playlists have changed".into()));
-            }
-            let mut frontier = vec![root.clone()];
-            while let Some(id) = frontier.pop() {
-                if !actual.insert(id.clone()) {
-                    return Err(DbError::Conflict("the confirmed playlists have changed".into()));
-                }
-                let attribute: i64 = tx.query_row(
-                    "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
-                    params![id], |row| row.get(0),
-                )?;
-                if !matches!(attribute, 0 | 1 | 4) {
-                    return Err(DbError::WriteRefused("unsupported playlist type in confirmed deletion".into()));
-                }
-                let mut stmt = tx.prepare("SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0")?;
-                frontier.extend(stmt.query_map(params![id], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?);
-            }
-        }
-        if expected_set.len() != expected.len() || actual != expected_set {
-            return Err(DbError::Conflict("the confirmed playlists have changed".into()));
-        }
-        let mut all = PlaylistDeletion::default();
+        validate_heading_forest(&tx, roots, expected)?;
+        let mut all = PlaylistDeletion { heading_roots: roots.to_vec(), ..PlaylistDeletion::default() };
         let mut changed = Changed { rows: 0, usn: 0 };
         for root in roots {
             let (part, deletion) = tombstone_subtree(&tx, root, &stamp)?;
@@ -1749,6 +1722,18 @@ impl Writer {
         let to = i64::from(deleted);
         let mut rows = 0;
         let mut usn = 0;
+
+        if deleted && !deletion.heading_roots.is_empty() {
+            validate_heading_forest(&tx, &deletion.heading_roots, &deletion.playlist_ids)?;
+            let expected: std::collections::HashSet<_> = deletion.membership_ids.iter().cloned().collect();
+            let mut actual = std::collections::HashSet::new();
+            for playlist in &deletion.playlist_ids {
+                actual.extend(live_members(&tx, playlist)?);
+            }
+            if actual != expected {
+                return Err(DbError::Conflict("the confirmed playlist tracks have changed".into()));
+            }
+        }
 
         // Foreign-key order even though the reference schema does not enforce
         // it: children disappear first and return only after their playlist.
@@ -6473,6 +6458,42 @@ fn intern(
     Ok(Some(id))
 }
 
+/// Checks the confirmed playlist rows while the caller's transaction
+/// keeps their contents stable. Unrelated root siblings need not match.
+fn validate_heading_forest(conn: &Connection, roots: &[String], expected: &[String]) -> Result<()> {
+    let expected_set: std::collections::HashSet<_> = expected.iter().cloned().collect();
+    let mut actual = std::collections::HashSet::new();
+    let mut root_set = std::collections::HashSet::new();
+    for root in roots {
+        if !root_set.insert(root) || conn.query_row(
+            "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND ParentID = ?2 AND rb_local_deleted = 0",
+            params![root, ROOT], |_| Ok(()),
+        ).optional()?.is_none() {
+            return Err(DbError::Conflict("the confirmed playlists have changed".into()));
+        }
+        let mut frontier = vec![root.clone()];
+        while let Some(id) = frontier.pop() {
+            if !actual.insert(id.clone()) {
+                return Err(DbError::Conflict("the confirmed playlists have changed".into()));
+            }
+            let attribute: i64 = conn.query_row(
+                "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![id], |row| row.get(0),
+            )?;
+            if !matches!(attribute, 0 | 1 | 4) {
+                return Err(DbError::WriteRefused("unsupported playlist type in confirmed deletion".into()));
+            }
+            let mut stmt = conn.prepare("SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0")?;
+            frontier.extend(stmt.query_map(params![id], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?);
+        }
+    }
+    if expected_set.len() != expected.len() || actual != expected_set {
+        return Err(DbError::Conflict("the confirmed playlists have changed".into()));
+    }
+    Ok(())
+}
+
 /// Soft-deletes a playlist or folder, everything inside it, and every
 /// membership that pointed at it, inside the caller's transaction. The
 /// caller sets the USN counter to [`Changed::usn`] before committing.
@@ -6534,6 +6555,7 @@ fn tombstone_subtree(tx: &Connection, id: &str, stamp: &str) -> Result<(Changed,
     Ok((Changed { rows, usn }, PlaylistDeletion {
         playlist_ids: doomed,
         membership_ids,
+        heading_roots: Vec::new(),
     }))
 }
 
