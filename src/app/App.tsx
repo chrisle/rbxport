@@ -4,7 +4,8 @@ import { ImportSkipsDialog } from "@/components/ImportSkipsDialog";
 import { ConfirmHost } from "@/components/ConfirmDialog";
 import type { ColorOwner } from "@/store/useColorNames";
 import type { DuplicateAnswer } from "@/components/DuplicateTracksDialog";
-import type { FolderClashAnswer } from "@/lib/folderDrop";
+import { dropFolders, type FolderClashAnswer } from "@/lib/folderDrop";
+import { importCollection } from "@/lib/xmlImport";
 import { JobQueue, slices, type JobView } from "@/lib/jobQueue";
 import { importInSlices, removeInSlices } from "@/lib/bulkJobs";
 import { INITIAL_SYNC, deckStartedPlaying, isFollowing, pressMaster, toggleBeatSync, type SyncState } from "@/lib/syncMaster";
@@ -1314,7 +1315,6 @@ function AppBody() {
           total: paths.length,
           stoppable: paths.length > 1,
           run: async ({ signal, update }) => {
-            const { dropFolders } = await import("@/lib/folderDrop");
             await dropFolders(playlistId, paths, t, report, refuse, refreshPlaylistTree, analysisPrefs.auto ? analysis.add : undefined,
               { mode: advancedPrefs.folderDropClash, ask: askFolderClash }, signal, (done) => update({ done }));
           },
@@ -2499,10 +2499,9 @@ function AppBody() {
     [runImport],
   );
 
-  // File > Import rekordbox xml / iTunes Library, loaded on demand to keep
-  // the first paint small.
+  // File > Import rekordbox xml / iTunes Library. The small import helpers
+  // share the already lazy main window chunk to avoid separate wrappers.
   const importXmlFromMenu = useCallback(async (source: "rekordbox" | "itunes" = "rekordbox") => {
-    const { importCollection } = await import("@/lib/xmlImport");
     await importCollection(source, t, setNote, async (backend, imported) => {
       await refreshPlaylistTree(backend);
       if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
