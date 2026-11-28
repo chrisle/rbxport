@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.11.1",
+    "date": "2026-11-28",
+    "changes": [
+      "(New) Choose Delete Playlist on the Playlists heading to clear all local playlists and folders after confirming. Your tracks and audio files stay in the Collection, and you can undo the deletion in one step.",
+      "(Fixed) On macOS, you can drag in local audio files that previously failed to import.",
+      "(Fixed) Sort Items from the Playlist menu or keyboard shortcut sorts the selected folder or Playlists heading in the focused browser, including the sub-browser.",
+      "(Fixed) Creating a playlist selects it in the browser where you created it.",
+      "(Improved) The FAQ explains how to see your RBXport hot cue and beat grid edits in rekordbox and how to export playlists to USB with Sync Manager."
+    ]
+  },
+  {
     "version": "1.11.0",
     "date": "2026-11-27",
     "changes": [
